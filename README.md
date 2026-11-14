@@ -236,5 +236,10 @@ pytest backend/tests/test_engine.py
 
 ---
 
-## 👥 sunhacks 2026 Team
+## 👥 sunhacks 2026 Team & Workload Split
+For complete developer domain guides, see **[TEAM_WORKLOAD_SPLIT.md](TEAM_WORKLOAD_SPLIT.md)**:
+- 👁️ **Developer 1 (Sensing & Scoring)**: [`src/dev1_sensing_and_scoring/`](src/dev1_sensing_and_scoring/) — [Dev 1 Guide](src/dev1_sensing_and_scoring/README.md)
+- 🦫 **Developer 2 (Mascot & Desktop UI)**: [`src/dev2_mascot_and_ui/`](src/dev2_mascot_and_ui/) & [`electron/`](electron/) — [Dev 2 Guide](src/dev2_mascot_and_ui/README.md)
+- 🐅 **Developer 3 (Tiger Data & Gemini Cloud)**: [`backend/`](backend/) — [Dev 3 Guide](backend/DEV3_BACKEND_GUIDE.md)
+
 Built with ❤️ for **sunhacks 2026** by Team ErgoGotchi.
