@@ -146,6 +146,22 @@ npm run electron
 ```
 *(On Windows, you can also double-click `scripts\start_frontend.bat`)*
 
+### 4. Build Standalone Desktop Apps (.exe & .app)
+You can package standalone executables that run directly without needing a terminal:
+
+**🪟 For Windows (`.exe`):**
+```bash
+npm run package:win
+```
+- **Portable App (Zero Installation)**: `release/ErgoGotchi 1.0.0.exe` *(double-click to run anywhere)*
+- **Windows Setup Installer**: `release/ErgoGotchi Setup 1.0.0.exe`
+
+**🍏 For macOS (`.app`):**
+```bash
+npm run package:mac
+```
+- **Native macOS Application**: `release/mac-arm64/ErgoGotchi.app` *(double-click in Finder or run `open release/mac-arm64/ErgoGotchi.app`)*
+
 ---
 
 ## ⚡ 3-Minute Live Judging Demo Script
