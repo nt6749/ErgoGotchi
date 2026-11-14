@@ -40,7 +40,9 @@ function createPetWindow() {
   });
 
   petWindow.setAlwaysOnTop(true, 'floating');
-  petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (process.platform === 'darwin') {
+    petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
 
   // Load URL
   if (app.isPackaged) {

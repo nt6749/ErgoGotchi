@@ -115,18 +115,25 @@ cp .env.example .env
 ```
 
 ### 2. Start Backend Service
+**On macOS / Linux:**
 ```bash
-# Set up Python virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
-
-# Run FastAPI Server (serves WebSockets & Tiger Data endpoints on port 8000)
-python backend/app/main.py
+./scripts/start_backend.sh
 ```
-*(Note: If PostgreSQL/TimescaleDB is not running locally, ErgoGotchi automatically starts in SQLite emulation mode, ensuring 100% zero-config operation!)*
+
+**On Windows (Command Prompt or PowerShell):**
+```cmd
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r backend\requirements.txt
+scripts\start_backend.bat
+```
+*(Note: If PostgreSQL/TimescaleDB is not running locally, ErgoGotchi automatically starts in SQLite emulation mode, ensuring 100% zero-config operation on both Windows and Mac!)*
 
 ### 3. Start Frontend & Desktop App
+**On any OS (Windows, macOS, Linux):**
 ```bash
 # Install frontend dependencies
 npm install
@@ -137,6 +144,7 @@ npm run dev
 # Option B: Run Native Electron Transparent Desktop Pet
 npm run electron
 ```
+*(On Windows, you can also double-click `scripts\start_frontend.bat`)*
 
 ---
 
