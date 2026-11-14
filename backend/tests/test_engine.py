@@ -1,6 +1,11 @@
 """Unit tests for backend endpoints and telemetry models."""
 
+import os
+import sys
 import pytest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from app.config import settings
 from app.gemini.engine import gemini_engine, STRETCH_INSTRUCTIONS
 
@@ -20,14 +25,14 @@ def test_stretch_instructions_complete():
         assert cue in STRETCH_INSTRUCTIONS
         assert len(STRETCH_INSTRUCTIONS[cue]) > 10
 
-@pytest.mark.asyncio
-async def test_instant_cached_intervention():
+def test_instant_cached_intervention():
     """Verify intervention responds in <10ms from cache without network blocking."""
-    resp = await gemini_engine.get_intervention(
+    import asyncio
+    resp = asyncio.run(gemini_engine.get_intervention(
         request_id="test-req-1",
         reason="SLOUCH",
         context={"worst_signal": "forward_head", "hp": 45}
-    )
+    ))
     assert resp["type"] == "intervention"
     assert resp["cue"] == "CHIN_TUCK"
     assert resp["severity"] == "WARNING"  # hp < 50

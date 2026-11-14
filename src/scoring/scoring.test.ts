@@ -103,10 +103,11 @@ describe('ErgoGotchi Scoring Engine', () => {
   it('fires intervention request on sustained slouch in DEMO mode', () => {
     let state = createInitialState();
     state.state = 'SLOUCHING';
+    state.slouchDwellAccumulator = DEMO_PARAMS.slouchDwellSeconds;
     state.hp = 60;
     state.speechCooldownTimer = 0;
 
-    // In demo mode, sustained slouch trigger is 3s
+    // In demo mode, sustained slouch trigger is 3s (3 steps of 1.0s)
     state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
     state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
     state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
