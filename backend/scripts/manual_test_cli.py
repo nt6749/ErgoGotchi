@@ -19,6 +19,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from app.config import settings
 from app.gemini.engine import gemini_engine, STRETCH_INSTRUCTIONS, CANNED_LINES
 from app.db.database import db
+from app.grok_bot.service import grok_bot
+
+# Enable console logging for backend components
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 # Setup dedicated manual trace logger
 TRACE_LOG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tests", "manual_trace.log"))
@@ -371,17 +375,19 @@ async def run_diagnostics(scenario: dict):
     sev_color = RED if severity == "WARNING" else YELLOW
 
     # --- Section D: AI Persona Response & Dispatch ---
+    context_data = {
+        "hp": current_hp,
+        "worst_signal": cue_signal,
+        "strain_index": strain_index,
+        "blink_rate_1m": signals.get("blink_rate_1m", 12),
+        "minutes_in_session": 45
+    }
+
     pool_size = len(gemini_engine.cache.get(cue, []))
     resp = await gemini_engine.get_intervention(
         request_id=req_id,
         reason=reason,
-        context={
-            "hp": current_hp,
-            "worst_signal": cue_signal,
-            "strain_index": strain_index,
-            "blink_rate_1m": signals.get("blink_rate_1m", 12),
-            "minutes_in_session": 45
-        }
+        context=context_data
     )
     elapsed_ms = (time.time() - t0) * 1000
 
@@ -393,6 +399,47 @@ async def run_diagnostics(scenario: dict):
     print(f"   • Speech Line Source: {GREEN}{resp['source']}{RESET} (cache candidate pool: {pool_size} lines)")
     print(f"   • ErgoGotchi Says:    {BOLD}\"{resp['text']}\"{RESET}")
 
+    # --- Section 4: Physical Desk-Setup Diagnosis & Next-Session Quest ---
+    scenario_stats = {
+        "min_hp": int(current_hp),
+        "avg_strain": round(strain_index, 3),
+        "peak_strain": round(strain_index, 3),
+        "avg_forward_head": round(float(signals.get("forward_head") or 0.04), 3),
+        "avg_head_drop": round(float(signals.get("head_drop") or 0.03), 3),
+        "avg_blink_rate": round(float(signals.get("blink_rate_1m") or 14.0), 1),
+        "minutes": 45
+    }
+    diagnosis = grok_bot.diagnose_desk_setup(scenario_stats)
+
+    print(f"\n{BOLD}{CYAN}4. 🔧 Physical Desk-Setup Diagnosis & Next-Session Quest:{RESET}")
+    print(f"   • Diagnosis Code:     {YELLOW}{BOLD}[{diagnosis['code']}]{RESET}")
+    print(f"   • Biomechanical Cause:{RESET} {diagnosis['cause']}")
+    print(f"   • Zero-Cost Fix ($0): {GREEN}{BOLD}{diagnosis['fix']}{RESET}")
+    print(f"   • Next-Session Quest: {CYAN}{BOLD}{diagnosis['quest']}{RESET}")
+
+    # Prompt to send medal card
+    webhook_url = settings.GROK_WEBHOOK_URL or ""
+    url_hint = f"({webhook_url})" if webhook_url else "(No URL set in .env)"
+    send_prompt = input(f"\n{BOLD}Send this scenario's achievement card to webhook {url_hint}? [y/N]: {RESET}").strip().lower()
+    if send_prompt in ("y", "yes"):
+        target_url = webhook_url
+        if not target_url:
+            target_url = input(f"{BOLD}Enter webhook URL (ntfy.sh / Discord / Slack): {RESET}").strip()
+        if target_url:
+            print(f"{CYAN}Dispatching 6-field achievement medal to {target_url}...{RESET}")
+            ok = await grok_bot.send_session_digest(
+                session_id=f"sim-{req_id}",
+                summary_text=resp['text'],
+                stats=scenario_stats,
+                webhook_url=target_url
+            )
+            if ok:
+                print(f"{GREEN}✓ Successfully dispatched! Check your notification receiver.{RESET}")
+            else:
+                print(f"{RED}✗ Dispatch failed. Check terminal error log.{RESET}")
+        else:
+            print("No URL provided, skipping dispatch.")
+
     # Record full trace to log file
     trace_entry = (
         f"[REQ {req_id}] [DIAGNOSTIC] Scenario='{scenario['title']}' | HP={current_hp} | "
@@ -402,6 +449,28 @@ async def run_diagnostics(scenario: dict):
     )
     trace_logger.info(trace_entry)
     print(f"\n   {BLUE}ℹ️ Diagnostic trace appended to: {TRACE_LOG_PATH}{RESET}")
+    print("-" * 66 + "\n")
+
+
+async def test_live_gemini():
+    print(f"\n{BOLD}{CYAN}=== Testing Live Gemini API Connection ({settings.GEMINI_MODEL}) ==={RESET}")
+    if not gemini_engine.client:
+        print(f"{RED}Gemini client is not initialized. Please verify GEMINI_API_KEY in .env.{RESET}")
+        return
+    print(f"Querying model '{settings.GEMINI_MODEL}' for live session summary...")
+    t0 = time.time()
+    try:
+        summary = await gemini_engine.generate_session_summary({
+            "avg_strain": 0.28,
+            "min_hp": 80,
+            "minutes": 45,
+            "avg_blink_rate": 14
+        })
+        ms = (time.time() - t0) * 1000
+        print(f"{GREEN}✓ Gemini {settings.GEMINI_MODEL} responded in {ms:.0f}ms!{RESET}")
+        print(f"{BOLD}\"{summary}\"{RESET}")
+    except Exception as e:
+        print(f"{RED}✗ Live Gemini API call failed: {e}{RESET}")
     print("-" * 66 + "\n")
 
 
@@ -417,22 +486,138 @@ def view_recent_traces():
     print("-" * 66 + "\n")
 
 
+async def test_live_webhook():
+    print(f"\n{BOLD}{CYAN}=== Testing Live Webhook Dispatch (ntfy.sh / Discord / Slack) ==={RESET}")
+    url = settings.GROK_WEBHOOK_URL or ""
+    if not url:
+        print(f"{YELLOW}⚠️ No GROK_WEBHOOK_URL found in .env!{RESET}")
+        custom_url = input(f"{BOLD}Enter a webhook URL (or press Enter to cancel): {RESET}").strip()
+        if not custom_url:
+            print("Cancelled.")
+            return
+        url = custom_url
+
+    print(f"Target URL: {url}")
+    print("Select Diagnosis & Medal Scenario to simulate:")
+    print("  [1] 🥇 DIALED_IN — Gold Medal (Zero-point baseline locked: HP 92, Strain 0.15)")
+    print("  [2] 🔧 SCREEN_MAGNET — Craning into screen (Fwd Head +15% -> Ctrl + = font fix)")
+    print("  [3] 🔧 MONITOR_TOO_LOW — Screen below eye level (Head Drop +14% -> 2 textbooks fix)")
+    print("  [4] 👁️ OPTICAL_FIXATION — Staring without blinking (Blinks 6.5 bpm -> 20-20-20 rule)")
+    print("  [5] 🥉 LUMBAR_SLUMP — Comeback Kid (HP 35 -> Rolled-up hoodie backrest fix)")
+    tier_choice = input(f"{BOLD}Enter scenario [1-5, default 1]: {RESET}").strip() or "1"
+
+    if tier_choice == "2":
+        stats = {
+            "min_hp": 70,
+            "avg_strain": 0.35,
+            "peak_strain": 0.52,
+            "avg_forward_head": 0.15,
+            "avg_head_drop": 0.03,
+            "avg_blink_rate": 14.0,
+            "minutes": 45,
+        }
+        summary = "You kept Bobi alive, but you were inching toward the monitor like a magnet!"
+    elif tier_choice == "3":
+        stats = {
+            "min_hp": 65,
+            "avg_strain": 0.38,
+            "peak_strain": 0.55,
+            "avg_forward_head": 0.03,
+            "avg_head_drop": 0.14,
+            "avg_blink_rate": 13.5,
+            "minutes": 40,
+        }
+        summary = "Bobi felt the neck strain! Your screen is sitting too low on your desk."
+    elif tier_choice == "4":
+        stats = {
+            "min_hp": 75,
+            "avg_strain": 0.28,
+            "peak_strain": 0.40,
+            "avg_forward_head": 0.04,
+            "avg_head_drop": 0.03,
+            "avg_blink_rate": 6.5,
+            "minutes": 35,
+        }
+        summary = "Deep focus mode engaged, but your eyes need moisture! Remember to blink."
+    elif tier_choice == "5":
+        stats = {
+            "min_hp": 35,
+            "avg_strain": 0.65,
+            "peak_strain": 0.88,
+            "avg_forward_head": 0.05,
+            "avg_head_drop": 0.04,
+            "avg_blink_rate": 11.0,
+            "minutes": 30,
+        }
+        summary = "Bobi survived a near-fatal slouch puddle and pulled off a 360° backflip revival!"
+    else:
+        stats = {
+            "min_hp": 94,
+            "avg_strain": 0.12,
+            "peak_strain": 0.22,
+            "avg_forward_head": 0.02,
+            "avg_head_drop": 0.02,
+            "avg_blink_rate": 16.5,
+            "minutes": 50,
+        }
+        summary = "Masterclass in ergonomic discipline! Zero-point baseline held effortlessly."
+
+    # Show deterministic diagnosis preview in CLI
+    diagnosis = grok_bot.diagnose_desk_setup(stats)
+    print(f"\n{BOLD}Diagnostic Engine Output:{RESET}")
+    print(f"  • Code: {YELLOW}{diagnosis['code']}{RESET}")
+    print(f"  • Cause: {diagnosis['cause']}")
+    print(f"  • Fix ($0): {GREEN}{diagnosis['fix']}{RESET}")
+    print(f"  • Quest: {CYAN}{diagnosis['quest']}{RESET}")
+
+    print(f"\n{CYAN}Dispatching 6-field achievement medal to webhook...{RESET}")
+    success = await grok_bot.send_session_digest(
+        session_id="manual-test",
+        summary_text=summary,
+        stats=stats,
+        webhook_url=url
+    )
+    if success:
+        print(f"{GREEN}✓ Successfully dispatched medal & diagnosis to {url}! Check your channel/browser now.{RESET}")
+    else:
+        print(f"{RED}✗ Webhook dispatch failed. Check terminal logs above or verify your URL.{RESET}")
+    print("-" * 66 + "\n")
+
+
 async def main_loop():
     print_banner()
+
+    if gemini_engine.client:
+        print(f"{CYAN}⏳ Pre-fetching 4 fresh Gemini lines for every posture cue...{RESET}")
+        try:
+            await gemini_engine.warm_cache(count=4)
+            gemini_counts = {k: len([x for x in v if x not in CANNED_LINES.get(k, [])]) for k, v in gemini_engine.cache.items()}
+            print(f"{GREEN}✓ Prefetched successfully! Fresh Gemini lines ready in cache: {gemini_counts}{RESET}\n")
+        except Exception as e:
+            print(f"{YELLOW}⚠️ Prefetch failed ({e}). Defaulting to built-in canned responses.{RESET}\n")
+
+        # Launch periodic background refill (adds 2 fresh Gemini lines every 3 minutes)
+        asyncio.create_task(gemini_engine.periodic_refill_loop(interval_seconds=180, count_per_cue=2))
 
     while True:
         print(f"{BOLD}Select an action or posture situation to simulate:{RESET}")
         for k, v in PRESET_SCENARIOS.items():
             print(f"  [{k}] {v['title']}")
         print("  [8] Custom Input (Type your own Biometrics & HP)")
+        print("  [G] Test Live Gemini 3.8 Flash Connection")
+        print("  [W] Test Live Achievement Webhook (ntfy.sh / Discord / Slack)")
         print("  [L] View Diagnostic Log History")
         print("  [0] Exit")
 
-        choice = input(f"\n{BOLD}Enter choice [0-8, L]: {RESET}").strip().upper()
+        choice = input(f"\n{BOLD}Enter choice [0-8, G, W, L]: {RESET}").strip().upper()
 
         if choice == "0":
             print("Exiting ErgoGotchi CLI. Keep sitting upright!")
             break
+        elif choice == "G":
+            await test_live_gemini()
+        elif choice == "W":
+            await test_live_webhook()
         elif choice in PRESET_SCENARIOS:
             await run_diagnostics(PRESET_SCENARIOS[choice])
         elif choice == "8":
@@ -490,4 +675,7 @@ async def main_loop():
 
 
 if __name__ == "__main__":
-    asyncio.run(main_loop())
+    try:
+        asyncio.run(main_loop())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("\nExiting ErgoGotchi CLI. Keep sitting upright!")

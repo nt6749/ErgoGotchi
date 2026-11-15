@@ -34,6 +34,7 @@ import {
   setLevel,
   type PetProfile,
 } from './dev2_mascot_and_ui/progression';
+import { OnboardingWizard, ONBOARDING_STORAGE_KEY } from './dev2_mascot_and_ui/OnboardingWizard';
 
 /** Posture warnings clear after this many consecutive seconds of good posture. */
 const CLEAR_WARNING_AFTER_GOOD_SECONDS = 2;
@@ -57,11 +58,13 @@ import {
   type Events,
   type Journal,
 } from './dev2_mascot_and_ui/journal';
-import { BUTTON_PRIMARY, loadTheme, PAGE, saveTheme, type ThemeMode } from './dev2_mascot_and_ui/theme';
+import { BUTTON_NEUTRAL, BUTTON_PRIMARY, loadTheme, PAGE, saveTheme, type ThemeMode } from './dev2_mascot_and_ui/theme';
 
 interface ElectronAPI {
   isElectron: boolean;
   openDashboard: () => void;
+  setPetBounds?: (bounds: { width: number; height: number; x?: number; y?: number; center?: boolean }) => void;
+  setIgnoreMouse?: (ignore: boolean) => void;
   onRecalibrate: (cb: () => void) => void;
   onForceState: (cb: (state: PetState) => void) => void;
   onToggleDemoMode: (cb: () => void) => void;
@@ -71,6 +74,9 @@ interface ElectronAPI {
   onForceActivity: (cb: (value: ForcedActivity) => void) => void;
   onAddCorn: (cb: (amount: number) => void) => void;
   onResetGrowth: (cb: () => void) => void;
+  onOpenWizard?: (cb: () => void) => void;
+  centerPet?: (width?: number, height?: number) => void;
+  dockPet?: () => void;
 }
 
 /**
@@ -118,6 +124,13 @@ export const App: React.FC = () => {
   const [showDashboard, setShowDashboard] = useState(isDashboardView);
   const [isDemoMode, setIsDemoMode] = useState(true); // Default to Demo mode for sunhacks judging!
   const [forcedState, setForcedState] = useState<PetState | null>(null);
+  const [showWizard, setShowWizard] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    } catch {
+      return false;
+    }
+  });
 
   // Scoring and biometric state
   const [scoringState, setScoringState] = useState<ScoringState>(createInitialState());
@@ -500,6 +513,7 @@ export const App: React.FC = () => {
     electronAPI.onRecalibrate(() => handleRecalibrate());
     electronAPI.onForceState((s) => forceState(s));
     electronAPI.onToggleDemoMode(() => toggleDemoMode());
+    electronAPI.onOpenWizard?.(() => setShowWizard(true));
   }, []);
 
   // 5. Growth and activity: follow the Electron shell and the other window
@@ -522,6 +536,32 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
+  // Handle dynamic pet window size expansion & centering for onboarding wizard
+  useEffect(() => {
+    if (isPetWindow && showWizard) {
+      if (electronAPI?.centerPet) {
+        electronAPI.centerPet(480, 640);
+      } else if (electronAPI?.setPetBounds) {
+        electronAPI.setPetBounds({ width: 480, height: 640, center: true });
+      }
+      electronAPI?.setIgnoreMouse?.(false);
+    }
+  }, [isPetWindow, showWizard]);
+
+  const handleWizardComplete = () => {
+    setShowWizard(false);
+    if (isPetWindow) {
+      // Return to original corner dock position
+      if (electronAPI?.dockPet) {
+        electronAPI.dockPet();
+      } else if (electronAPI?.setPetBounds) {
+        electronAPI.setPetBounds({ width: 280, height: 320 });
+      }
+      electronAPI?.setIgnoreMouse?.(true);
+    }
+    handleRecalibrate();
+  };
+
   const handleOpenDashboard = () => {
     if (electronAPI) electronAPI.openDashboard();
     else setShowDashboard(true);
@@ -530,6 +570,17 @@ export const App: React.FC = () => {
   const activeState = forcedState || scoringState.state;
 
   if (isPetWindow) {
+    if (showWizard) {
+      return (
+        <div className="w-screen h-screen bg-transparent flex items-center justify-center p-2 select-none overflow-hidden">
+          <OnboardingWizard
+            onComplete={handleWizardComplete}
+            onRecalibrateRequested={handleRecalibrate}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="w-screen h-screen bg-transparent flex flex-col items-center justify-end overflow-hidden select-none pb-1">
         {isCalibrating && (
@@ -561,9 +612,17 @@ export const App: React.FC = () => {
     );
   }
 
+  // First-run setup wizard, shown on top of the dashboard or the browser preview
+  const wizardOverlay = showWizard && (
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+      <OnboardingWizard onComplete={handleWizardComplete} onRecalibrateRequested={handleRecalibrate} />
+    </div>
+  );
+
   if (showDashboard) {
     return (
       <div data-theme={theme} className={`h-screen font-sans select-none overflow-hidden ${PAGE}`}>
+        {wizardOverlay}
         <Dashboard
           hp={scoringState.hp}
           state={activeState}
@@ -608,12 +667,18 @@ export const App: React.FC = () => {
             <p className="text-[11px] text-[var(--muted)]">Desktop preview</p>
           </div>
         </div>
-        <button onClick={() => setShowDashboard(true)} className={BUTTON_PRIMARY}>
-          Open dashboard
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setShowWizard(true)} className={BUTTON_NEUTRAL}>
+            Setup wizard 🪄
+          </button>
+          <button onClick={() => setShowDashboard(true)} className={BUTTON_PRIMARY}>
+            Open dashboard
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center relative z-10 w-full p-4">
+        {wizardOverlay}
           <div className="relative w-full max-w-4xl h-96 rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
             {/* Mock Code Editor in Background to demonstrate desktop companion feel */}
             <div className="font-mono text-xs text-slate-500 space-y-1 select-none pointer-events-none opacity-60">

@@ -21,9 +21,9 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.config import settings
-from app.db.database import db, to_session_uuid
+from app.db.database import db, to_session_uuid, _clean_float, _clean_state
 from app.gemini.engine import gemini_engine, STRETCH_INSTRUCTIONS, CANNED_LINES, _safe_json_loads
-from app.grok_bot.service import grok_bot
+from app.grok_bot.service import grok_bot, is_safe_webhook_url
 from app.main import app, telemetry_buffer, buffer_lock
 
 logger = logging.getLogger("ergogotchi.tests")
@@ -37,6 +37,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 def test_cue_mapping_standard():
     """Verify deterministic clinical cue selection for all valid biomechanical signals."""
     logger.info("Executing test_cue_mapping_standard...")
+    assert gemini_engine.determine_cue("RECOVERED", {}) == "NONE"
+    assert gemini_engine.determine_cue("RECOVERED", None) == "NONE"
+    assert gemini_engine.determine_cue("RECOVERED", {"worst_signal": "forward_head"}) == "NONE"
     assert gemini_engine.determine_cue("LOW_BLINK", {}) == "LOOK_AWAY"
     assert gemini_engine.determine_cue("LONG_SESSION", {}) == "STAND_UP"
     assert gemini_engine.determine_cue("SLOUCH", {"worst_signal": "forward_head"}) == "CHIN_TUCK"
@@ -156,6 +159,34 @@ def test_intervention_cache_fallback_resilience(monkeypatch):
         logger.info("Successfully fell back to canned line: '%s'", resp["text"])
     finally:
         gemini_engine.cache["CHIN_TUCK"] = orig_cache
+
+
+def test_intervention_gemini_lines_priority(monkeypatch):
+    """Verify fresh Gemini lines take precedence over canned lines and emit source='gemini'."""
+    logger.info("Executing test_intervention_gemini_lines_priority...")
+    monkeypatch.setattr(gemini_engine, "client", None)
+    gemini_line = "Your posture is so sharp it could cut glass."
+    orig_cache = list(gemini_engine.cache.get("CHIN_TUCK", []))
+    gemini_engine.cache["CHIN_TUCK"] = list(CANNED_LINES["CHIN_TUCK"]) + [gemini_line]
+    gemini_engine.recent_lines.clear()
+
+    try:
+        resp = asyncio.run(gemini_engine.get_intervention("req-gemini-prio", "SLOUCH", {"worst_signal": "forward_head"}))
+        assert resp["text"] == gemini_line
+        assert resp["source"] == "gemini"
+        logger.info("-> Successfully prioritized newest Gemini line with source='gemini'.")
+    finally:
+        gemini_engine.cache["CHIN_TUCK"] = orig_cache
+
+
+def test_intervention_recovered_cue_none(monkeypatch):
+    """Verify RECOVERED reason outputs cue NONE and does not scold user."""
+    logger.info("Executing test_intervention_recovered_cue_none...")
+    monkeypatch.setattr(gemini_engine, "client", None)
+    resp = asyncio.run(gemini_engine.get_intervention("req-rec-1", "RECOVERED", {"worst_signal": "forward_head"}))
+    assert resp["cue"] == "NONE"
+    assert resp["text"] in CANNED_LINES["NONE"]
+    logger.info("-> Successfully handled RECOVERED with cue NONE: '%s'", resp["text"])
 
 
 def test_repetition_avoidance_and_buffer_cap(monkeypatch):
@@ -369,12 +400,53 @@ def test_sqlite_batch_insert_and_time_filtering():
 def test_database_close_lifecycle():
     """Verify db.connect() and db.close() executes cleanly with no lingering locks."""
     logger.info("Executing test_database_close_lifecycle...")
-    asyncio.run(db.connect())
-    assert db.sqlite_conn is not None or db.pool is not None
-    asyncio.run(db.close())
-    assert db.pool is None
-    assert db.sqlite_conn is None
+    async def _run():
+        await db.connect()
+        assert db.sqlite_conn is not None or db.pool is not None
+        await db.close()
+        assert db.pool is None
+        assert db.sqlite_conn is None
+    asyncio.run(_run())
     logger.info("-> Cleanly opened and closed database lifecycle.")
+
+
+def test_db_zero_hp_preservation_and_float_batch():
+    """Verify 0 HP does not become 100 HP and batch insert handles floats/deduping."""
+    logger.info("Executing test_db_zero_hp_preservation_and_float_batch...")
+    async def _run():
+        await db.connect()
+        try:
+            now_ts = datetime.now(timezone.utc).isoformat()
+            records = [
+                {
+                    "session_id": "test-zero-hp-session",
+                    "recorded_at": now_ts,
+                    "present": True,
+                    "blink_rate_1m": 8.5,
+                    "hp": 0.0,
+                    "strain_index": 0.9,
+                    "state": "WILTED"
+                },
+                # Duplicate (session_id, recorded_at) to verify deduping
+                {
+                    "session_id": "test-zero-hp-session",
+                    "recorded_at": now_ts,
+                    "present": True,
+                    "blink_rate_1m": 9.2,
+                    "hp": 0.0,
+                    "strain_index": 0.95,
+                    "state": "WILTED"
+                }
+            ]
+            await db.insert_telemetry_batch(records)
+            series = await db.get_series("test-zero-hp-session", minutes=30)
+            assert len(series) >= 1
+            assert series[-1]["min_hp"] == 0, f"Expected min_hp == 0, got {series[-1]['min_hp']}"
+            logger.info("-> Successfully preserved 0 HP and handled float batch ingestion.")
+        finally:
+            await db.close()
+
+    asyncio.run(_run())
 
 
 # ============================================================================
@@ -482,24 +554,180 @@ def test_fastapi_websocket_auth_and_protocols(monkeypatch):
         logger.info("-> WebSocket safely recovered from malformed JSON without dropping.")
 
 
-def test_grok_bot_service_safeties():
-    """Verify Grok Bot webhook service gracefully handles missing URLs, None IDs, and empty stats."""
-    logger.info("Executing test_grok_bot_service_safeties...")
-    # 1. Unconfigured webhook returns False cleanly
-    res_no_url = asyncio.run(grok_bot.send_session_digest(
-        session_id="test-session",
-        summary_text="Great work sitting upright!",
-        stats={"min_hp": 80, "avg_strain": 0.2, "avg_blink_rate": 14},
-        webhook_url=""
-    ))
-    assert res_no_url is False
+def test_desk_setup_diagnosis_deterministic():
+    """Verify Grok Bot deterministically diagnoses physical desk flaws from F/W and D/W drift vectors."""
+    logger.info("Executing test_desk_setup_diagnosis_deterministic...")
 
-    # 2. Non-string / short / None session_id survives formatting
-    res_none_id = asyncio.run(grok_bot.send_session_digest(
-        session_id=None,
-        summary_text="Focus session complete.",
-        stats={},
-        webhook_url=""
-    ))
-    assert res_none_id is False
-    logger.info("-> Grok Bot service safeties verified.")
+    # 1. High Y-axis head drop + low forward head -> MONITOR_TOO_LOW (2 textbooks fix)
+    d_low = grok_bot.diagnose_desk_setup({"avg_head_drop": 0.14, "avg_forward_head": 0.03, "avg_blink_rate": 14})
+    assert d_low["code"] == "MONITOR_TOO_LOW"
+    assert "textbooks" in d_low["fix"]
+
+    # 2. High Z-axis forward head -> SCREEN_MAGNET (Ctrl + = font size fix)
+    d_mag = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.15, "avg_head_drop": 0.04, "avg_blink_rate": 14})
+    assert d_mag["code"] == "SCREEN_MAGNET"
+    assert "Ctrl + =" in d_mag["fix"]
+
+    # 3. Low blink rate (< 9 bpm) -> OPTICAL_FIXATION (20-20-20 quest)
+    d_blink = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.03, "avg_head_drop": 0.03, "avg_blink_rate": 6.5})
+    assert d_blink["code"] == "OPTICAL_FIXATION"
+    assert "20-20-20" in d_blink["quest"]
+
+    # 4. High strain / low HP with normal head vectors -> LUMBAR_SLUMP (hoodie/pillow backrest fix)
+    d_slump = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.04, "avg_head_drop": 0.04, "avg_blink_rate": 14, "min_hp": 35})
+    assert d_slump["code"] == "LUMBAR_SLUMP"
+
+    # 5. Healthy session -> DIALED_IN
+    d_good = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.02, "avg_head_drop": 0.02, "avg_blink_rate": 15, "avg_strain": 0.15, "min_hp": 92})
+    assert d_good["code"] == "DIALED_IN"
+    logger.info("-> Passed deterministic desk-setup diagnoses.")
+
+
+def test_grok_bot_service_safeties(monkeypatch):
+    """Verify Grok Bot handles None stats, ASCII header safety for ntfy, and 6-field Discord diagnostic cards."""
+    logger.info("Executing test_grok_bot_service_safeties...")
+
+    captured = []
+
+    class DummyResponse:
+        status_code = 200
+        text = "ok"
+
+    async def fake_post(url, **kwargs):
+        # Verify all HTTP headers are strictly ASCII/Latin-1 encodable
+        for k, v in (kwargs.get("headers") or {}).items():
+            v.encode("latin-1")
+        captured.append((url, kwargs))
+        return DummyResponse()
+
+    async def _run():
+        # 1. Unconfigured webhook returns False cleanly
+        assert await grok_bot.send_session_digest("s1", "Great job!", {"min_hp": 85}, webhook_url="") is False
+
+        # 2. Explicit None metrics do not raise TypeError
+        assert await grok_bot.send_session_digest(
+            None,
+            None,
+            {
+                "min_hp": None,
+                "avg_strain": None,
+                "peak_strain": None,
+                "avg_forward_head": None,
+                "avg_head_drop": None,
+                "avg_blink_rate": None,
+                "minutes": None,
+            },
+            webhook_url="",
+        ) is False
+
+        client = grok_bot._get_client()
+        monkeypatch.setattr(client, "post", fake_post)
+
+        stats = {
+            "min_hp": 88,
+            "avg_strain": 0.18,
+            "peak_strain": 0.34,
+            "avg_forward_head": 0.14,  # Triggers SCREEN_MAGNET diagnosis
+            "avg_head_drop": 0.03,
+            "avg_blink_rate": 16.2,
+            "minutes": 45,
+        }
+
+        # 3. ntfy.sh route: ASCII-safe headers + UTF-8 bytes body with diagnosis
+        assert await grok_bot.send_session_digest("sess-1234", "Awesome session!", stats, "https://ntfy.sh/ergo_demo") is True
+        assert "headers" in captured[-1][1]
+        assert b"SCREEN_MAGNET" in captured[-1][1]["content"]
+
+        # 4. Google Chat route: strictly {"text": ...} with no Discord "embeds"
+        assert await grok_bot.send_session_digest("sess-1234", "Awesome session!", stats, "https://chat.googleapis.com/v1/spaces/x") is True
+        gchat_json = captured[-1][1]["json"]
+        assert set(gchat_json.keys()) == {"text"}
+        assert "SCREEN_MAGNET" in gchat_json["text"]
+
+        # 5. Discord / generic route: includes all 6 fields (4 telemetry + Desk Diagnosis + Next-Session Quest)
+        assert await grok_bot.send_session_digest("sess-1234", "Awesome session!", stats, "https://discord.com/api/webhooks/1/2") is True
+        discord_json = captured[-1][1]["json"]
+        assert "text" in discord_json and "embeds" in discord_json
+        fields = discord_json["embeds"][0]["fields"]
+        assert len(fields) == 6
+        assert "SCREEN_MAGNET" in fields[4]["name"]
+        assert "Falcon Eye Protocol" in fields[5]["value"]
+
+        await grok_bot.aclose()
+        assert grok_bot._client is None
+
+    asyncio.run(_run())
+    logger.info("-> Grok Bot service safeties, ASCII headers, and 6-field diagnostic embed verified.")
+
+
+def test_security_hardening_audit(monkeypatch):
+    """Verify SSRF defense, NaN aggregate poison prevention, 4KB WS frame guard, and webhook cooldown."""
+    logger.info("Executing test_security_hardening_audit...")
+
+    # 1. SSRF Defense: is_safe_webhook_url
+    assert is_safe_webhook_url("https://discord.com/api/webhooks/123/xyz") is True
+    assert is_safe_webhook_url("https://canary.discord.com/api/webhooks/123/xyz") is True
+    assert is_safe_webhook_url("https://hooks.slack.com/services/T00/B00/X00") is True
+    assert is_safe_webhook_url("https://chat.googleapis.com/v1/spaces/FOO/messages") is True
+    assert is_safe_webhook_url("https://ntfy.sh/bobi_posture_channel") is True
+
+    # Suffix match spoofing attack (must fail)
+    assert is_safe_webhook_url("https://attacker-discord.com/api/webhooks") is False
+    assert is_safe_webhook_url("https://evil-ntfy.sh/hacked") is False
+
+    # Plain HTTP (must fail)
+    assert is_safe_webhook_url("http://discord.com/api/webhooks/123/xyz") is False
+
+    # Private IP literals & loopback / link-local addresses (must fail)
+    assert is_safe_webhook_url("https://127.0.0.1:8080/hook") is False
+    assert is_safe_webhook_url("https://169.254.169.254/latest/meta-data") is False
+    assert is_safe_webhook_url("https://10.0.0.1/admin") is False
+    assert is_safe_webhook_url("https://192.168.1.1/secret") is False
+    assert is_safe_webhook_url("invalid-url-string") is False
+
+    # 2. NaN / Infinity aggregate poison prevention (_clean_float)
+    import math
+    assert _clean_float(float("nan")) is None
+    assert _clean_float(float("inf")) is None
+    assert _clean_float(float("-inf")) is None
+    assert _clean_float(None) is None
+    assert _clean_float(0.45) == 0.45
+    assert _clean_float(0.0) == 0.0
+
+    # 3. State enum injection prevention (_clean_state)
+    assert _clean_state("THRIVING") == "THRIVING"
+    assert _clean_state("SLOUCHING") == "SLOUCHING"
+    assert _clean_state("WILTED") == "WILTED"
+    assert _clean_state("NEUTRAL") == "NEUTRAL"
+    assert _clean_state("DROP TABLE ergo_raw;") == "NEUTRAL"
+    assert _clean_state("UNKNOWN_STATE") == "NEUTRAL"
+    assert _clean_state(None) == "NEUTRAL"
+
+    # 4. WebSocket 4KB frame size drop & resilience
+    client = TestClient(app)
+    with client.websocket_connect("/ws?token=dev") as ws:
+        # Send an oversized frame > 4096 bytes
+        huge_payload = json.dumps({"type": "telemetry", "payload": "A" * 5000})
+        ws.send_text(huge_payload)
+        # Connection must survive and handle subsequent valid frames
+        ws.send_text(json.dumps({"type": "ping"}))
+        pong = json.loads(ws.receive_text())
+        assert pong["type"] == "pong"
+
+    # 5. Webhook Cooldown / Rate Limiting (10s flood guard)
+    async def mock_send(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(grok_bot, "send_session_digest", mock_send)
+
+    # First request succeeds
+    resp1 = client.post("/grok-bot/webhook?session_id=flood-test&webhook_url=https://discord.com/api/webhooks/1/2")
+    assert resp1.status_code == 200
+
+    # Immediate second request triggers HTTP 429 Too Many Requests
+    resp2 = client.post("/grok-bot/webhook?session_id=flood-test&webhook_url=https://discord.com/api/webhooks/1/2")
+    assert resp2.status_code == 429
+    assert "Rate limit exceeded" in resp2.json()["detail"]
+
+    logger.info("-> Passed security hardening audit test suite.")
+

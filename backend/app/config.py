@@ -25,6 +25,7 @@ class Settings(BaseModel):
     
     # Security
     SHARED_TOKEN: str = os.getenv("SHARED_TOKEN", "ergogotchi_sunhacks_2026_secret")
+    ALLOW_DEV_TOKEN: bool = _get_bool("ALLOW_DEV_TOKEN", True)
     
     # Google Gemini API
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")

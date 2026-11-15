@@ -1,13 +1,15 @@
 """ErgoGotchi FastAPI Server: Telemetry Ingestion, Tiger Data Aggregation & Gemini Coaching."""
 
 import asyncio
+import hmac
 import json
 import logging
 import os
 import sys
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 # Ensure backend root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -17,16 +19,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.db.database import db
+from app.db.database import db, _clean_state
 from app.gemini.engine import gemini_engine
 from app.grok_bot.service import grok_bot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("ergogotchi.main")
 
-# Memory buffer for 1 Hz telemetry batch inserts
-telemetry_buffer: List[Dict[str, Any]] = []
+# Ring buffer for 1 Hz telemetry batch inserts with O(1) eviction
+telemetry_buffer: deque[Dict[str, Any]] = deque(maxlen=settings.BUFFER_MAX_SIZE)
 buffer_lock = asyncio.Lock()
+
+# In-memory session summary cache with 30s TTL: session_id -> (timestamp, fingerprint_tuple, data_dict)
+summary_cache: Dict[str, tuple[float, tuple, Dict[str, Any]]] = {}
 
 async def flush_buffer_task():
     """Periodically flush telemetry buffer into TimescaleDB/SQLite."""
@@ -55,7 +60,8 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting %s...", settings.APP_NAME)
     await db.connect()
-    asyncio.create_task(gemini_engine.warm_cache())
+    asyncio.create_task(gemini_engine.warm_cache(count=4))
+    refiller = asyncio.create_task(gemini_engine.periodic_refill_loop(interval_seconds=180, count_per_cue=2))
     flusher = asyncio.create_task(flush_buffer_task())
     try:
         yield
@@ -63,8 +69,13 @@ async def lifespan(app: FastAPI):
         # Shutdown
         logger.info("Shutting down %s...", settings.APP_NAME)
         flusher.cancel()
+        refiller.cancel()
         try:
             await flusher
+        except asyncio.CancelledError:
+            pass
+        try:
+            await refiller
         except asyncio.CancelledError:
             pass
 
@@ -73,12 +84,13 @@ async def lifespan(app: FastAPI):
             if telemetry_buffer:
                 logger.info("Executing final flush of %d telemetry records...", len(telemetry_buffer))
                 try:
-                    await db.insert_telemetry_batch(telemetry_buffer)
+                    await db.insert_telemetry_batch(list(telemetry_buffer))
                 except Exception as e:
                     logger.error("Error during final shutdown telemetry flush: %s", e)
                 telemetry_buffer.clear()
 
         await db.close()
+        await grok_bot.aclose()
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
@@ -118,40 +130,80 @@ async def get_session_series(session_id: str, minutes: int = Query(default=30, g
 
 @app.get("/sessions/{session_id}/summary")
 async def get_session_summary(session_id: str):
-    """Computes session overview and generates 3-sentence Gemini ergonomic coaching summary."""
+    """Computes session overview, baseline drift vectors, and cached 3-sentence Gemini coaching summary."""
     rows = await db.get_series(session_id, minutes=120)
     if not rows:
         return {
+            "session_id": session_id,
             "summary": "No session telemetry recorded yet. Start sitting upright with your ErgoGotchi!",
-            "stats": {"min_hp": 100, "avg_strain": 0.0, "minutes": 0, "avg_blink_rate": 15}
+            "stats": {
+                "min_hp": 100,
+                "avg_strain": 0.0,
+                "peak_strain": 0.0,
+                "avg_forward_head": 0.0,
+                "avg_head_drop": 0.0,
+                "minutes": 0,
+                "avg_blink_rate": 15.0,
+            }
         }
 
-    avg_strain = sum(r["avg_strain"] for r in rows) / len(rows)
-    min_hp = min(r["min_hp"] for r in rows)
-    avg_blink = sum(r["avg_blink_rate"] for r in rows) / len(rows)
+    n = len(rows)
+    avg_strain = sum((r.get("avg_strain") or 0.0) for r in rows) / n
+    peak_strain = max((r.get("peak_strain") or 0.0) for r in rows)
+    avg_fhead = sum((r.get("avg_forward_head") or 0.0) for r in rows) / n
+    avg_hdrop = sum((r.get("avg_head_drop") or 0.0) for r in rows) / n
+    min_hp = int(min((100 if r.get("min_hp") is None else r["min_hp"]) for r in rows))
+    avg_blink = sum((r.get("avg_blink_rate") or 15.0) for r in rows) / n
+
     stats = {
         "avg_strain": round(avg_strain, 3),
+        "peak_strain": round(peak_strain, 3),
+        "avg_forward_head": round(avg_fhead, 3),
+        "avg_head_drop": round(avg_hdrop, 3),
         "min_hp": min_hp,
-        "minutes": len(rows),
-        "avg_blink_rate": round(avg_blink, 1)
+        "minutes": n,
+        "avg_blink_rate": round(avg_blink, 1),
     }
+
+    fingerprint = (n, min_hp, round(avg_strain, 1), round(avg_fhead, 2), round(avg_hdrop, 2))
+    now = asyncio.get_running_loop().time()
+    cached = summary_cache.get(session_id)
+    if cached and (now - cached[0]) < 30.0 and cached[1] == fingerprint:
+        return cached[2]
 
     summary = await gemini_engine.generate_session_summary(stats)
-    return {
+    result = {
         "session_id": session_id,
         "stats": stats,
-        "summary": summary
+        "summary": summary,
     }
+    summary_cache[session_id] = (now, fingerprint, result)
+    return result
+
+# 10-Second Per-Session Cooldown on POST /grok-bot/webhook
+webhook_cooldowns: Dict[str, float] = {}
 
 @app.post("/grok-bot/webhook")
-async def dispatch_grok_bot(session_id: str):
-    """Trigger SpaceXSI Grok Bot daily/session digest dispatch."""
+async def dispatch_grok_bot(session_id: str, webhook_url: Optional[str] = None):
+    """Trigger SpaceXSI Grok Bot daily/session digest dispatch with 10s flood guard."""
+    now = asyncio.get_running_loop().time()
+    last_sent = webhook_cooldowns.get(session_id, 0.0)
+    if (now - last_sent) < 10.0:
+        remaining = round(10.0 - (now - last_sent), 1)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded: Cooldown active ({remaining}s remaining)",
+        )
+
     summary_resp = await get_session_summary(session_id)
     sent = await grok_bot.send_session_digest(
         session_id=session_id,
         summary_text=summary_resp["summary"],
-        stats=summary_resp["stats"]
+        stats=summary_resp["stats"],
+        webhook_url=webhook_url or settings.GROK_BOT_WEBHOOK_URL,
     )
+    if sent:
+        webhook_cooldowns[session_id] = now
     return {"dispatched": sent, "session_id": session_id}
 
 @app.websocket("/ws")
@@ -162,9 +214,11 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
     - Ingests Contract 2 (Intervention Request)
     - Emits Contract 3 (Intervention with Gemini Persona Joke & Biomechanical Cue)
     """
-    # Shared secret verification
-    if token != settings.SHARED_TOKEN and token != "dev":
-        logger.warning("WebSocket rejected: invalid token '%s'", token)
+    # Constant-time token verification + dev toggle
+    valid_secret = bool(settings.SHARED_TOKEN) and hmac.compare_digest(token, settings.SHARED_TOKEN)
+    valid_dev = settings.ALLOW_DEV_TOKEN and hmac.compare_digest(token, "dev")
+    if not (valid_secret or valid_dev):
+        logger.warning("WebSocket rejected: unauthorized token '%s'", token)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -174,6 +228,10 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
     try:
         while True:
             text_data = await websocket.receive_text()
+            if len(text_data) > 4096:
+                logger.warning("Dropped oversized WebSocket frame (%d bytes)", len(text_data))
+                continue
+
             try:
                 msg = json.loads(text_data)
             except json.JSONDecodeError as jde:
@@ -196,7 +254,7 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
                     "blink_rate_1m": msg.get("blink_rate_1m"),
                     "strain_index": msg.get("strain_index"),
                     "hp": msg.get("hp"),
-                    "state": msg.get("state")
+                    "state": _clean_state(msg.get("state"))
                 }
                 async with buffer_lock:
                     if len(telemetry_buffer) >= settings.BUFFER_MAX_SIZE:

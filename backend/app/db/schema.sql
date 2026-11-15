@@ -59,3 +59,8 @@ ALTER TABLE ergo_telemetry SET (
 );
 
 SELECT add_compression_policy('ergo_telemetry', INTERVAL '2 hours', if_not_exists => TRUE);
+
+-- Composite index for O(1) sorted window scan on ergo_1min
+CREATE INDEX IF NOT EXISTS idx_ergo_1min_session_bucket
+ON ergo_1min (session_id, bucket ASC);
+
