@@ -92,12 +92,16 @@ class DatabaseManager:
             """)
 
     async def _init_postgres(self, conn: asyncpg.Connection):
-        """Execute PostgreSQL / TimescaleDB schema."""
+        """Execute PostgreSQL / TimescaleDB schema statement-by-statement."""
         try:
             schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
             with open(schema_path, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
-            await conn.execute(schema_sql)
+            for stmt in [s.strip() for s in schema_sql.split(";") if s.strip()]:
+                try:
+                    await conn.execute(stmt + ";")
+                except Exception as stmt_err:
+                    logger.debug("Schema statement skipped/note: %s", stmt_err)
             logger.info("TimescaleDB / Tiger Data schema verified successfully.")
         except Exception as e:
             logger.warning("Error applying full TimescaleDB schema (%s). Running basic table creation.", e)
@@ -126,8 +130,7 @@ class DatabaseManager:
 
         if self.pool:
             try:
-                # asyncpg copy_records_to_table format
-                tuples = []
+                deduped = {}
                 for r in records:
                     ts = r.get("recorded_at")
                     if isinstance(ts, str):
@@ -139,8 +142,10 @@ class DatabaseManager:
                         ts = datetime.now(timezone.utc)
 
                     sid = to_session_uuid(r.get("session_id"))
+                    raw_blink = r.get("blink_rate_1m")
+                    raw_hp = r.get("hp")
 
-                    tuples.append((
+                    deduped[(sid, ts)] = (
                         ts,
                         sid,
                         bool(r.get("present", True)),
@@ -149,11 +154,12 @@ class DatabaseManager:
                         r.get("lean_in"),
                         r.get("head_pitch_deg"),
                         r.get("shoulder_tilt_deg"),
-                        r.get("blink_rate_1m"),
+                        int(round(float(raw_blink))) if raw_blink is not None else None,
                         r.get("strain_index"),
-                        r.get("hp"),
+                        int(round(float(raw_hp))) if raw_hp is not None else 100,
                         r.get("state")
-                    ))
+                    )
+                tuples = list(deduped.values())
 
                 async with self.pool.acquire() as conn:
                     await conn.copy_records_to_table(
@@ -188,6 +194,8 @@ class DatabaseManager:
                 ts = datetime.now(timezone.utc).isoformat()
 
             sid = str(to_session_uuid(r.get("session_id")))
+            raw_blink = r.get("blink_rate_1m")
+            raw_hp = r.get("hp")
             rows.append((
                 ts,
                 sid,
@@ -197,9 +205,9 @@ class DatabaseManager:
                 r.get("lean_in"),
                 r.get("head_pitch_deg"),
                 r.get("shoulder_tilt_deg"),
-                r.get("blink_rate_1m"),
+                int(round(float(raw_blink))) if raw_blink is not None else None,
                 r.get("strain_index"),
-                r.get("hp"),
+                int(round(float(raw_hp))) if raw_hp is not None else 100,
                 r.get("state")
             ))
 
@@ -244,7 +252,7 @@ class DatabaseManager:
                             "avg_forward_head": float(r["avg_forward_head"] or 0),
                             "avg_head_drop": float(r["avg_head_drop"] or 0),
                             "avg_blink_rate": float(r["avg_blink_rate"] or 0),
-                            "min_hp": int(r["min_hp"] or 100),
+                            "min_hp": 100 if r["min_hp"] is None else int(r["min_hp"]),
                         }
                         for r in rows
                     ]
@@ -296,7 +304,7 @@ class DatabaseManager:
                 "avg_forward_head": round(float(r["avg_forward_head"] or 0), 3),
                 "avg_head_drop": round(float(r["avg_head_drop"] or 0), 3),
                 "avg_blink_rate": round(float(r["avg_blink_rate"] or 0), 1),
-                "min_hp": int(r["min_hp"] or 100),
+                "min_hp": 100 if r["min_hp"] is None else int(r["min_hp"]),
             })
         return results
 

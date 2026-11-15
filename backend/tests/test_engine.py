@@ -37,6 +37,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 def test_cue_mapping_standard():
     """Verify deterministic clinical cue selection for all valid biomechanical signals."""
     logger.info("Executing test_cue_mapping_standard...")
+    assert gemini_engine.determine_cue("RECOVERED", {}) == "NONE"
+    assert gemini_engine.determine_cue("RECOVERED", None) == "NONE"
+    assert gemini_engine.determine_cue("RECOVERED", {"worst_signal": "forward_head"}) == "NONE"
     assert gemini_engine.determine_cue("LOW_BLINK", {}) == "LOOK_AWAY"
     assert gemini_engine.determine_cue("LONG_SESSION", {}) == "STAND_UP"
     assert gemini_engine.determine_cue("SLOUCH", {"worst_signal": "forward_head"}) == "CHIN_TUCK"
@@ -156,6 +159,34 @@ def test_intervention_cache_fallback_resilience(monkeypatch):
         logger.info("Successfully fell back to canned line: '%s'", resp["text"])
     finally:
         gemini_engine.cache["CHIN_TUCK"] = orig_cache
+
+
+def test_intervention_gemini_lines_priority(monkeypatch):
+    """Verify fresh Gemini lines take precedence over canned lines and emit source='gemini'."""
+    logger.info("Executing test_intervention_gemini_lines_priority...")
+    monkeypatch.setattr(gemini_engine, "client", None)
+    gemini_line = "Your posture is so sharp it could cut glass."
+    orig_cache = list(gemini_engine.cache.get("CHIN_TUCK", []))
+    gemini_engine.cache["CHIN_TUCK"] = list(CANNED_LINES["CHIN_TUCK"]) + [gemini_line]
+    gemini_engine.recent_lines.clear()
+
+    try:
+        resp = asyncio.run(gemini_engine.get_intervention("req-gemini-prio", "SLOUCH", {"worst_signal": "forward_head"}))
+        assert resp["text"] == gemini_line
+        assert resp["source"] == "gemini"
+        logger.info("-> Successfully prioritized newest Gemini line with source='gemini'.")
+    finally:
+        gemini_engine.cache["CHIN_TUCK"] = orig_cache
+
+
+def test_intervention_recovered_cue_none(monkeypatch):
+    """Verify RECOVERED reason outputs cue NONE and does not scold user."""
+    logger.info("Executing test_intervention_recovered_cue_none...")
+    monkeypatch.setattr(gemini_engine, "client", None)
+    resp = asyncio.run(gemini_engine.get_intervention("req-rec-1", "RECOVERED", {"worst_signal": "forward_head"}))
+    assert resp["cue"] == "NONE"
+    assert resp["text"] in CANNED_LINES["NONE"]
+    logger.info("-> Successfully handled RECOVERED with cue NONE: '%s'", resp["text"])
 
 
 def test_repetition_avoidance_and_buffer_cap(monkeypatch):
@@ -375,6 +406,42 @@ def test_database_close_lifecycle():
     assert db.pool is None
     assert db.sqlite_conn is None
     logger.info("-> Cleanly opened and closed database lifecycle.")
+
+
+def test_db_zero_hp_preservation_and_float_batch():
+    """Verify 0 HP does not become 100 HP and batch insert handles floats/deduping."""
+    logger.info("Executing test_db_zero_hp_preservation_and_float_batch...")
+    asyncio.run(db.connect())
+    try:
+        now_ts = datetime.now(timezone.utc).isoformat()
+        records = [
+            {
+                "session_id": "test-zero-hp-session",
+                "recorded_at": now_ts,
+                "present": True,
+                "blink_rate_1m": 8.5,
+                "hp": 0.0,
+                "strain_index": 0.9,
+                "state": "WILTED"
+            },
+            # Duplicate (session_id, recorded_at) to verify deduping
+            {
+                "session_id": "test-zero-hp-session",
+                "recorded_at": now_ts,
+                "present": True,
+                "blink_rate_1m": 9.2,
+                "hp": 0.0,
+                "strain_index": 0.95,
+                "state": "WILTED"
+            }
+        ]
+        asyncio.run(db.insert_telemetry_batch(records))
+        series = asyncio.run(db.get_series("test-zero-hp-session", minutes=30))
+        assert len(series) >= 1
+        assert series[-1]["min_hp"] == 0, f"Expected min_hp == 0, got {series[-1]['min_hp']}"
+        logger.info("-> Successfully preserved 0 HP and handled float batch ingestion.")
+    finally:
+        asyncio.run(db.close())
 
 
 # ============================================================================

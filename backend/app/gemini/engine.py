@@ -187,6 +187,8 @@ Rules:
 
     def determine_cue(self, reason: str, context: Optional[Dict[str, Any]] = None) -> str:
         """Deterministically maps biometric telemetry context to a stretch cue."""
+        if reason == "RECOVERED":
+            return "NONE"
         if reason == "LOW_BLINK":
             return "LOOK_AWAY"
         if reason == "LONG_SESSION":
@@ -229,19 +231,27 @@ Rules:
             pool = CANNED_LINES.get(cue, CANNED_LINES["CHIN_TUCK"])
             source = "canned"
 
-        # Pick line avoiding immediate repetitions
+        # Pick from the newest lines (end of list) first so fresh Gemini lines aren't buried
         candidates = [line for line in pool if line not in self.recent_lines[-5:]]
         if not candidates:
             candidates = pool
 
-        text = random.choice(candidates)
+        # If pool has grown beyond initial canned lines, prioritize the newest Gemini lines
+        canned_set = set(CANNED_LINES.get(cue, []))
+        gemini_candidates = [line for line in candidates if line not in canned_set]
+        if gemini_candidates:
+            text = gemini_candidates[-1]
+            source = "gemini"
+        else:
+            text = random.choice(candidates)
+
         self.recent_lines.append(text)
         if len(self.recent_lines) > 20:
             self.recent_lines.pop(0)
 
         # 2. Trigger asynchronous background generation with context
-        if self.client:
-            asyncio.create_task(self._generate_contextual_line(cue, reason, context))
+        if self.client and cue != "NONE":
+            asyncio.create_task(self._generate_contextual_line(cue, reason, ctx))
 
         return {
             "type": "intervention",
@@ -299,7 +309,7 @@ Return JSON: {{"text": "..."}}
             except (ValueError, TypeError):
                 avg_strain = 0.3
             try:
-                min_hp = int(stats.get("min_hp", 60) or 60)
+                min_hp = 60 if stats.get("min_hp") is None else int(stats.get("min_hp"))
             except (ValueError, TypeError):
                 min_hp = 60
             return (
