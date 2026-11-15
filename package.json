@@ -30,8 +30,7 @@
     ],
     "mac": {
       "target": [
-        "dmg",
-        "dir"
+        "dmg"
       ],
       "category": "public.app-category.productivity"
     },
