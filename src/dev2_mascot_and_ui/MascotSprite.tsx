@@ -490,11 +490,13 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         {/* Cute Poppy Draggable Indicator Hint when hovered */}
         {hovered && !isDragging && !banner && (
           <div
-            className={`absolute ${(alwaysShowCorn || hovered) && pet ? '-top-16' : '-top-7'} left-1/2 -translate-x-1/2 pointer-events-none z-50 whitespace-nowrap px-2.5 py-0.5 rounded-full bg-pink-500/90 text-white text-[10px] font-bold tracking-wide border border-pink-300 shadow-md flex items-center gap-1.5 opacity-95 transition-all duration-200 animate-pop-spring`}
+            className={`absolute ${(alwaysShowCorn || hovered) && pet ? '-top-16' : '-top-7'} left-1/2 -translate-x-1/2 pointer-events-none z-50 flex justify-center`}
           >
-            <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
-            <span>drag me anywhere</span>
-            <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
+            <div className="animate-pop-spring whitespace-nowrap px-2.5 py-0.5 rounded-full bg-pink-500/90 text-white text-[10px] font-bold tracking-wide border border-pink-300 shadow-md flex items-center gap-1.5 opacity-95">
+              <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
+              <span>drag me anywhere</span>
+              <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
+            </div>
           </div>
         )}
 
@@ -523,12 +525,11 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
           </div>
         )}
         {cornPops.map((pop) => (
-          <span
-            key={pop.id}
-            className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 text-[11px] font-black text-white animate-xp-float whitespace-nowrap px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 border border-white shadow-sm flex items-center justify-center gap-1"
-          >
-            +{pop.amount} 🌽
-          </span>
+          <div key={pop.id} className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex justify-center">
+            <span className="text-[11px] font-black text-white animate-xp-float whitespace-nowrap px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 border border-white shadow-sm flex items-center justify-center gap-1">
+              +{pop.amount} 🌽
+            </span>
+          </div>
         ))}
 
         {/* Fed: corn flies into the pet */}
@@ -568,14 +569,16 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
         {/* Corn status card: always shown if enabled (default), or shown on hover */}
         {pet && (alwaysShowCorn || hovered) && !banner && (
-          <div className="absolute -top-11 left-1/2 -translate-x-1/2 pointer-events-none z-40 whitespace-nowrap text-center px-3 py-1 rounded-2xl bg-white/95 backdrop-blur-sm border-2 border-pink-300 shadow-[0_4px_12px_rgba(244,114,182,0.25)] transition-all duration-200 animate-pop-spring">
-            <div className={`text-[12px] font-black leading-tight flex items-center justify-center gap-1.5 ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
-              <span>🌽</span>
-              <span>{profile.corn}/{need}</span>
-              {enoughCorn && <span className="text-[10px] bg-pink-100 text-pink-700 px-1.5 py-0.2 rounded-full border border-pink-200 font-bold">FEED!</span>}
-            </div>
-            <div className="text-[9px] font-bold text-neutral-500 leading-tight text-center">
-              {enoughCorn ? `Click to feed ${profile.name} ✨` : `${need - profile.corn} more to level up`}
+          <div className="absolute -top-11 left-1/2 -translate-x-1/2 pointer-events-none z-40 flex justify-center">
+            <div className="animate-pop-spring whitespace-nowrap text-center px-3 py-1 rounded-2xl bg-white/95 backdrop-blur-sm border-2 border-pink-300 shadow-[0_4px_12px_rgba(244,114,182,0.25)] transition-all duration-200">
+              <div className={`text-[12px] font-black leading-tight flex items-center justify-center gap-1.5 ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
+                <span>🌽</span>
+                <span>{profile.corn}/{need}</span>
+                {enoughCorn && <span className="text-[10px] bg-pink-100 text-pink-700 px-1.5 py-0.2 rounded-full border border-pink-200 font-bold">FEED!</span>}
+              </div>
+              <div className="text-[9px] font-bold text-neutral-500 leading-tight text-center">
+                {enoughCorn ? `Click to feed ${profile.name} ✨` : `${need - profile.corn} more to level up`}
+              </div>
             </div>
           </div>
         )}
