@@ -30,6 +30,12 @@ import {
 } from './progression';
 import { QuestsTab } from './QuestsTab';
 import {
+  probeBackendStatus,
+  testIntegration,
+  saveIntegrationConfig,
+  type BackendConfigStatus,
+} from '../net/configClient';
+import {
   BAD_TEXT,
   BAR_ACCENT,
   BAR_BAD,
@@ -362,10 +368,65 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [testWebhookStatus, setTestWebhookStatus] = useState<string | null>(null);
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
 
+  // Gemini API Key state for Settings Tab
+  const [geminiApiKeyInput, setGeminiApiKeyInput] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.geminiApiKey') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [backendConfigStatus, setBackendConfigStatus] = useState<BackendConfigStatus | null>(null);
+  const [isTestingGemini, setIsTestingGemini] = useState(false);
+  const [testGeminiStatus, setTestGeminiStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    probeBackendStatus()
+      .then((status) => setBackendConfigStatus(status))
+      .catch(() => {});
+  }, []);
+
+  const handleSaveGeminiKey = (key: string) => {
+    setGeminiApiKeyInput(key);
+    try {
+      if (key.trim()) {
+        localStorage.setItem('ergogotchi.geminiApiKey', key.trim());
+        saveIntegrationConfig(key, webhookUrlInput, false, false);
+      } else {
+        localStorage.removeItem('ergogotchi.geminiApiKey');
+        saveIntegrationConfig('', webhookUrlInput, false, true);
+      }
+    } catch {}
+  };
+
+  const handleTestGeminiKey = async () => {
+    if (isTestingGemini) return;
+    setIsTestingGemini(true);
+    setTestGeminiStatus(null);
+    try {
+      const res = await testIntegration('gemini', geminiApiKeyInput);
+      if (res.ok) {
+        setTestGeminiStatus(`✓ ${res.message}`);
+      } else {
+        setTestGeminiStatus(`✗ ${res.message}`);
+      }
+    } catch {
+      setTestGeminiStatus('✗ Could not reach backend server on http://localhost:8000.');
+    } finally {
+      setIsTestingGemini(false);
+    }
+  };
+
   const handleSaveWebhook = (url: string) => {
     setWebhookUrlInput(url);
     try {
-      localStorage.setItem('ergogotchi.webhookUrl', url.trim());
+      if (url.trim()) {
+        localStorage.setItem('ergogotchi.webhookUrl', url.trim());
+        saveIntegrationConfig(geminiApiKeyInput, url, false, false);
+      } else {
+        localStorage.removeItem('ergogotchi.webhookUrl');
+        saveIntegrationConfig(geminiApiKeyInput, '', true, false);
+      }
     } catch {}
   };
 
@@ -375,14 +436,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setTestWebhookStatus(null);
     try {
       const url = webhookUrlInput.trim();
-      const res = await fetch(`http://localhost:8000/grok-bot/webhook?session_id=test-ping&webhook_url=${encodeURIComponent(url)}`, {
-        method: 'POST',
-      });
-      const data = await res.json();
-      if (res.ok && data.dispatched) {
-        setTestWebhookStatus(`✓ Test notification successfully dispatched to ${url}! Check your phone.`);
+      const res = await testIntegration('webhook', url);
+      if (res.ok) {
+        setTestWebhookStatus(`✓ ${res.message}`);
       } else {
-        setTestWebhookStatus(`✗ Dispatch note: ${data.reason || data.detail || 'Check server connection or URL.'}`);
+        setTestWebhookStatus(`✗ ${res.message}`);
       }
     } catch {
       setTestWebhookStatus('✗ Could not reach backend server on http://localhost:8000. Start backend first.');
@@ -1323,6 +1381,88 @@ GROUP BY bucket, session_id;`}</pre>
                 </label>
               </div>
 
+              {/* Gemini 2.5 AI Voice Lines & Personality Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">✨</span>
+                    <div>
+                      <h3 className="font-bold text-base">Gemini 2.5 AI Personality & Voice Lines</h3>
+                      <p className={`text-xs ${MUTED}`}>Powers adaptive speech cues and continuous ergonomic session summaries</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-mono font-semibold ${
+                    backendConfigStatus?.gemini_configured || geminiApiKeyInput
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                  }`}>
+                    {backendConfigStatus?.gemini_configured
+                      ? `ACTIVE (${backendConfigStatus.gemini_model || 'gemini-2.5-flash'})`
+                      : geminiApiKeyInput
+                      ? 'CONFIGURED'
+                      : 'OFFLINE EDGE MODE'}
+                  </span>
+                </div>
+
+                <div className={`${PANEL} p-4 rounded-xl space-y-3`}>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-[var(--ink)] block">
+                      Gemini API Key
+                    </label>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline"
+                    >
+                      Get free Google AI Studio key ↗
+                    </a>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="password"
+                      value={geminiApiKeyInput}
+                      onChange={(e) => handleSaveGeminiKey(e.target.value)}
+                      placeholder={
+                        backendConfigStatus?.gemini_configured
+                          ? 'Active in server .env (type new key to override)'
+                          : 'AIzaSy...'
+                      }
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-cyan-400 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleTestGeminiKey}
+                      disabled={isTestingGemini || (!geminiApiKeyInput.trim() && !backendConfigStatus?.gemini_configured)}
+                      className={`${BUTTON_PRIMARY} !bg-cyan-500 !text-slate-950 !border-cyan-400 font-bold whitespace-nowrap`}
+                    >
+                      {isTestingGemini ? 'Testing...' : '⚡ Test Key'}
+                    </button>
+                    {geminiApiKeyInput && (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveGeminiKey('')}
+                        className={`${BUTTON_OUTLINE} text-xs whitespace-nowrap text-rose-300 hover:text-rose-200`}
+                        title="Remove saved API key"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {testGeminiStatus && (
+                    <div className={`text-xs font-mono p-2.5 rounded-lg border ${
+                      testGeminiStatus.startsWith('✓')
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                        : 'bg-red-950/40 border-red-500/40 text-red-300'
+                    }`}>
+                      {testGeminiStatus}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* SpaceXSI Grok Bot & Mobile Notifications Card */}
               <div className={`${CARD} p-5 space-y-4`}>
                 <div className="flex items-center justify-between">
@@ -1334,7 +1474,7 @@ GROUP BY bucket, session_id;`}</pre>
                     </div>
                   </div>
                   <span className="text-xs px-2.5 py-1 rounded-full font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    ntfy.sh / Discord
+                    {backendConfigStatus?.webhook_configured ? backendConfigStatus.webhook_preview : 'ntfy.sh / Discord'}
                   </span>
                 </div>
 
@@ -1353,17 +1493,31 @@ GROUP BY bucket, session_id;`}</pre>
                       type="url"
                       value={webhookUrlInput}
                       onChange={(e) => handleSaveWebhook(e.target.value)}
-                      placeholder="https://ntfy.sh/ergogotchi_sunhacks_2026"
+                      placeholder={
+                        backendConfigStatus?.webhook_configured
+                          ? `Active in server .env (${backendConfigStatus.webhook_preview})`
+                          : 'https://ntfy.sh/ergogotchi_sunhacks_2026'
+                      }
                       className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-cyan-400 focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={handleTestWebhookPing}
-                      disabled={isTestingWebhook || !webhookUrlInput.trim()}
+                      disabled={isTestingWebhook || (!webhookUrlInput.trim() && !backendConfigStatus?.webhook_configured)}
                       className={`${BUTTON_PRIMARY} !bg-cyan-500 !text-slate-950 !border-cyan-400 font-bold whitespace-nowrap`}
                     >
                       {isTestingWebhook ? 'Sending...' : '⚡ Test Ping'}
                     </button>
+                    {webhookUrlInput && (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveWebhook('')}
+                        className={`${BUTTON_OUTLINE} text-xs whitespace-nowrap text-rose-300 hover:text-rose-200`}
+                        title="Remove saved webhook"
+                      >
+                        Clear
+                      </button>
+                    )}
                   </div>
 
                   {testWebhookStatus && (

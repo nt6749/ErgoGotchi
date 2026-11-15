@@ -731,3 +731,84 @@ def test_security_hardening_audit(monkeypatch):
 
     logger.info("-> Passed security hardening audit test suite.")
 
+
+# ============================================================================
+# 8. CONFIGURATION ENDPOINTS & FAILSAFES (WIZARD & SETTINGS INTEGRATION)
+# ============================================================================
+
+def test_config_endpoints_and_failsafes(monkeypatch):
+    """Verify runtime configuration status, hot-swapping, SSRF prevention, and rate limits."""
+    logger.info("Executing test_config_endpoints_and_failsafes...")
+    client = TestClient(app)
+
+    # 1. GET /config/status returns storage engine and credential status
+    resp = client.get("/config/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "storage" in data
+    assert "gemini_configured" in data
+    assert "webhook_configured" in data
+
+    # 2. POST /config ignores blank strings (Trap 1 Failsafe: never wipes .env keys)
+    initial_key = settings.GEMINI_API_KEY
+    resp_blank = client.post("/config", json={"gemini_api_key": "   ", "webhook_url": ""})
+    assert resp_blank.status_code == 200
+    assert resp_blank.json()["updated"] is True
+    assert settings.GEMINI_API_KEY == initial_key
+
+    # 3. POST /config rejects SSRF webhook URLs
+    resp_ssrf = client.post("/config", json={"webhook_url": "http://169.254.169.254/latest/meta-data"})
+    assert resp_ssrf.status_code == 400
+    assert "Disallowed or unsafe webhook target URL" in resp_ssrf.json()["error"]
+
+    # 4. POST /config pre-verifies Gemini key before mutating state (Trap 2 Failsafe: typos don't brick .env)
+    async def mock_verify_fail(candidate=None):
+        return False, "API key not valid. Please pass a valid API key."
+
+    monkeypatch.setattr(gemini_engine, "verify_key_fast", mock_verify_fail)
+    resp_typo = client.post("/config", json={"gemini_api_key": "AIzaSy_invalid_typo_key"})
+    assert resp_typo.status_code == 400
+    assert resp_typo.json()["updated"] is False
+    assert "API key not valid" in resp_typo.json()["error"]
+    assert settings.GEMINI_API_KEY == initial_key
+
+    # 5. POST /config hot-swaps valid key in memory
+    async def mock_verify_ok(candidate=None):
+        return True, "Gemini API key verified successfully."
+
+    monkeypatch.setattr(gemini_engine, "verify_key_fast", mock_verify_ok)
+    resp_valid = client.post("/config", json={"gemini_api_key": "AIzaSy_valid_runtime_key_12345"})
+    assert resp_valid.status_code == 200
+    assert resp_valid.json()["updated"] is True
+    assert settings.GEMINI_API_KEY == "AIzaSy_valid_runtime_key_12345"
+
+    # 6. POST /config clears webhook and gemini key cleanly
+    resp_clear = client.post("/config", json={"clear_webhook": True, "clear_gemini_key": True})
+    assert resp_clear.status_code == 200
+    assert not settings.GROK_WEBHOOK_URL
+    assert not settings.GEMINI_API_KEY
+
+    # Restore key
+    settings.GEMINI_API_KEY = initial_key
+
+    # 7. POST /config/test proxies webhook tests and enforces 3s flood guard
+    async def mock_test_ping(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(grok_bot, "send_session_digest", mock_test_ping)
+    import app.main as main_mod
+    main_mod._config_test_last_ping = 0.0  # reset cooldown
+
+    resp_ping1 = client.post("/config/test", json={"target": "webhook", "webhook_url": "https://discord.com/api/webhooks/123/abc"})
+    assert resp_ping1.status_code == 200
+    assert resp_ping1.json()["ok"] is True
+
+    # Immediate second ping must trigger 429
+    resp_ping2 = client.post("/config/test", json={"target": "webhook", "webhook_url": "https://discord.com/api/webhooks/123/abc"})
+    assert resp_ping2.status_code == 429
+    assert "Rate limit" in resp_ping2.json()["message"]
+
+    logger.info("-> Passed configuration endpoints & failsafes test suite.")
+
+

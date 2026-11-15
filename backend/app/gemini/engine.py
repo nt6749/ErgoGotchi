@@ -86,6 +86,48 @@ class GeminiPersonaEngine:
         except Exception as e:
             logger.warning("Could not initialise Google GenAI SDK (%s). Running with canned fallbacks.", e)
 
+    def reconfigure(self, api_key: str) -> bool:
+        """Hot-swap the Gemini API key at runtime and pre-warm the cache if newly enabled."""
+        clean_key = (api_key or "").strip().replace("\r", "").replace("\n", "")
+        if not clean_key:
+            return self.client is not None
+        try:
+            from google import genai
+            from google.genai import types
+            self.client = genai.Client(
+                api_key=clean_key,
+                http_options=types.HttpOptions(timeout=settings.GEMINI_TIMEOUT_MS),
+            )
+            settings.GEMINI_API_KEY = clean_key
+            logger.info("GeminiPersonaEngine hot-reconfigured with new API key.")
+            return True
+        except Exception as e:
+            logger.error("Failed to reconfigure GeminiPersonaEngine: %s", e)
+            return False
+
+    def verify_key_fast(self, candidate_key: Optional[str] = None) -> tuple[bool, str]:
+        """Lightweight 1-token probe for the Wizard 'Test Connection' button."""
+        key_to_test = (candidate_key or settings.GEMINI_API_KEY or "").strip().replace("\r", "").replace("\n", "")
+        if not key_to_test:
+            return False, "No API key provided."
+        try:
+            from google import genai
+            from google.genai import types
+            temp_client = genai.Client(
+                api_key=key_to_test,
+                http_options=types.HttpOptions(timeout=4000),
+            )
+            resp = temp_client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents="Reply with OK",
+                config=types.GenerateContentConfig(max_output_tokens=5, temperature=0.0),
+            )
+            if resp and getattr(resp, "text", None):
+                return True, f"Connected to {settings.GEMINI_MODEL}"
+            return False, "Empty response from Gemini API."
+        except Exception as e:
+            return False, f"Gemini validation failed: {str(e)[:120]}"
+
     def _call_gemini_api(self, prompt: str, json_mode: bool = True) -> str:
         """Call Gemini via google-genai models.generate_content or interactions.create."""
         if not self.client:

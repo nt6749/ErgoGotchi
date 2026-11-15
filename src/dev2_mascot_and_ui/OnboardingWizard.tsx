@@ -11,6 +11,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { renderPixelMascot } from './PixelMascot';
 import { soundEffects } from './soundEffects';
 import { visionPipeline, CAMERA_PREF_KEY, type CameraOption } from '../dev1_sensing_and_scoring/visionPipeline';
+import {
+  probeBackendStatus,
+  testIntegration,
+  saveIntegrationConfig,
+  type BackendConfigStatus,
+} from '../net/configClient';
 
 interface OnboardingWizardProps {
   onComplete: () => void;
@@ -23,7 +29,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   onComplete,
   onRecalibrateRequested,
 }) => {
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
   // Camera check state
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -40,6 +46,44 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const [calibrating, setCalibrating] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [calibrationDone, setCalibrationDone] = useState(false);
+
+  // AI & Webhook Configuration state (Step 4)
+  const [configStatus, setConfigStatus] = useState<BackendConfigStatus | null>(null);
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.geminiApiKey') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [webhookUrl, setWebhookUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.webhookUrl') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [testingGemini, setTestingGemini] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [webhookTestResult, setWebhookTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+
+  // Auto-detect backend status on mount and when entering step 4
+  useEffect(() => {
+    let active = true;
+    probeBackendStatus()
+      .then((status) => {
+        if (active) setConfigStatus(status);
+      })
+      .catch(() => {
+        if (active) setConfigStatus({ online: false, gemini_configured: false, webhook_configured: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, [step]);
 
   // Stop video preview element on unmount without closing the shared pipeline stream
   useEffect(() => {
@@ -188,6 +232,52 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
     }, 1000);
   };
 
+  const handleTestGemini = async () => {
+    setTestingGemini(true);
+    setGeminiTestResult(null);
+    try {
+      const res = await testIntegration('gemini', geminiApiKey);
+      setGeminiTestResult(res);
+      if (res.ok) {
+        soundEffects.playPet();
+      }
+    } catch (err: any) {
+      setGeminiTestResult({ ok: false, message: err?.message || 'Connection test failed.' });
+    } finally {
+      setTestingGemini(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    setTestingWebhook(true);
+    setWebhookTestResult(null);
+    try {
+      const res = await testIntegration('webhook', webhookUrl);
+      setWebhookTestResult(res);
+      if (res.ok) {
+        soundEffects.playPet();
+      }
+    } catch (err: any) {
+      setWebhookTestResult({ ok: false, message: err?.message || 'Webhook ping failed.' });
+    } finally {
+      setTestingWebhook(false);
+    }
+  };
+
+  const handleSaveAndContinue = async () => {
+    setIsSavingConfig(true);
+    try {
+      if (geminiApiKey.trim() || webhookUrl.trim()) {
+        await saveIntegrationConfig(geminiApiKey, webhookUrl);
+      }
+    } catch (err) {
+      console.warn('[Onboarding] Error saving integration config:', err);
+    } finally {
+      setIsSavingConfig(false);
+      setStep(5);
+    }
+  };
+
   const finishOnboarding = () => {
     try {
       localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
@@ -220,7 +310,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
         </div>
         <div className="flex items-center gap-2 pointer-events-none">
           <span className="text-[10px] text-slate-500 font-mono">⋮⋮ Drag</span>
-          <span className="text-xs font-mono text-slate-400">Step {step} of 4</span>
+          <span className="text-xs font-mono text-slate-400">Step {step} of 5</span>
         </div>
       </div>
 
@@ -438,14 +528,205 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
             >
-              Next: How to Play &rarr;
+              Next: AI & Notifications &rarr;
             </button>
           </div>
         </div>
       )}
 
-      {/* STEP 4: HOW TO PLAY & FINISH */}
+      {/* STEP 4: AI & WEBHOOK NOTIFICATIONS */}
       {step === 4 && (
+        <div className="flex flex-col space-y-3 py-1 text-center">
+          {/* Status badge: Backend Online vs Offline Edge Mode */}
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${configStatus?.online ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span className="text-[11px] font-medium text-slate-300">
+                {configStatus?.online
+                  ? `Backend Engine Online (${configStatus.storage || 'timescaledb'})`
+                  : 'Edge Companion Mode (FastAPI optional)'}
+              </span>
+            </div>
+            {configStatus?.online && (
+              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                Connected
+              </span>
+            )}
+          </div>
+
+          <div>
+            <h3 className="text-base font-bold text-white">AI Persona & Notifications</h3>
+            <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">
+              Optional cloud superpowers: dynamic Gemini speech lines & instant posture stretch alerts to Discord, Slack, or ntfy.sh.
+            </p>
+          </div>
+
+          {/* Integration 1: Gemini 2.5 API Key */}
+          <div className="w-full bg-slate-800/70 border border-slate-700/80 rounded-2xl p-3 text-left space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">✨</span>
+                <span className="text-xs font-semibold text-slate-200">Gemini 2.5 API Key</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {configStatus?.gemini_configured && (
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-medium">
+                    ✓ Active via .env
+                  </span>
+                )}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 hover:underline"
+                >
+                  Get free key ↗
+                </a>
+              </div>
+            </div>
+
+            <div className="flex gap-1.5">
+              <div className="relative flex-1">
+                <input
+                  type={showGeminiKey ? 'text' : 'password'}
+                  value={geminiApiKey}
+                  onChange={(e) => {
+                    setGeminiApiKey(e.target.value);
+                    setGeminiTestResult(null);
+                  }}
+                  placeholder={
+                    configStatus?.gemini_configured
+                      ? 'Loaded from .env (paste to override)'
+                      : 'AIzaSy...'
+                  }
+                  className="w-full text-xs font-mono bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 pr-8 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGeminiKey(!showGeminiKey)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs"
+                  title={showGeminiKey ? 'Hide key' : 'Show key'}
+                >
+                  {showGeminiKey ? '🙈' : '👁️'}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleTestGemini}
+                disabled={testingGemini || (!geminiApiKey.trim() && !configStatus?.gemini_configured)}
+                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 transition shrink-0 flex items-center gap-1"
+              >
+                {testingGemini ? (
+                  <>
+                    <span className="w-3 h-3 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+                    <span>Testing...</span>
+                  </>
+                ) : (
+                  <span>Test Key</span>
+                )}
+              </button>
+            </div>
+
+            {geminiTestResult && (
+              <p className={`text-[10px] leading-tight ${geminiTestResult.ok ? 'text-emerald-300' : 'text-rose-400'}`}>
+                {geminiTestResult.ok ? '✓ ' : '✕ '}
+                {geminiTestResult.message}
+              </p>
+            )}
+          </div>
+
+          {/* Integration 2: Webhook Notifications */}
+          <div className="w-full bg-slate-800/70 border border-slate-700/80 rounded-2xl p-3 text-left space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">🔔</span>
+                <span className="text-xs font-semibold text-slate-200">Posture Stretch Webhook</span>
+              </div>
+              {configStatus?.webhook_configured && (
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-medium font-mono">
+                  ✓ {configStatus.webhook_preview}
+                </span>
+              )}
+            </div>
+
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={webhookUrl}
+                onChange={(e) => {
+                  setWebhookUrl(e.target.value);
+                  setWebhookTestResult(null);
+                }}
+                placeholder={
+                  configStatus?.webhook_configured
+                    ? 'Loaded from .env (paste to override)'
+                    : 'https://discord.com/api/webhooks/...'
+                }
+                className="flex-1 text-xs font-mono bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+              />
+
+              <button
+                type="button"
+                onClick={handleTestWebhook}
+                disabled={testingWebhook || (!webhookUrl.trim() && !configStatus?.webhook_configured)}
+                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 transition shrink-0 flex items-center gap-1"
+              >
+                {testingWebhook ? (
+                  <>
+                    <span className="w-3 h-3 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+                    <span>Sending...</span>
+                  </>
+                ) : (
+                  <span>Send Ping</span>
+                )}
+              </button>
+            </div>
+
+            {webhookTestResult && (
+              <p className={`text-[10px] leading-tight ${webhookTestResult.ok ? 'text-emerald-300' : 'text-rose-400'}`}>
+                {webhookTestResult.ok ? '✓ ' : '✕ '}
+                {webhookTestResult.message}
+              </p>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <button
+              onClick={() => setStep(3)}
+              className="w-1/4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+            >
+              &larr; Back
+            </button>
+
+            <button
+              onClick={() => setStep(5)}
+              className="w-1/3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition"
+            >
+              Skip for Now
+            </button>
+
+            <button
+              onClick={handleSaveAndContinue}
+              disabled={isSavingConfig}
+              className="flex-1 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-md shadow-emerald-500/20 transition active:scale-95 flex items-center justify-center gap-1.5"
+            >
+              {isSavingConfig ? (
+                <>
+                  <span className="w-3 h-3 rounded-full border-2 border-slate-950 border-t-transparent animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>Save & Continue &rarr;</span>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 5: HOW TO PLAY & FINISH */}
+      {step === 5 && (
         <div className="flex flex-col items-center space-y-3.5 py-1 text-center">
           <div className="scale-105">
             {renderPixelMascot('THRIVING', 100, null)}
@@ -482,14 +763,38 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={finishOnboarding}
-            className="w-full py-2.5 rounded-xl font-extrabold text-xs bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 shadow-xl shadow-emerald-500/25 transition active:scale-95"
-          >
-            Launch Desktop Pet ✨
-          </button>
+          <div className="flex gap-2 w-full pt-1">
+            <button
+              onClick={() => setStep(4)}
+              className="w-1/3 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+            >
+              &larr; Back
+            </button>
+            <button
+              onClick={finishOnboarding}
+              className="w-2/3 py-2.5 rounded-xl font-extrabold text-xs bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 shadow-xl shadow-emerald-500/25 transition active:scale-95"
+            >
+              Launch Desktop Pet ✨
+            </button>
+          </div>
         </div>
       )}
+
+      {/* Progress Dots */}
+      <div className="flex justify-center items-center gap-1.5 pt-3 border-t border-slate-800/80">
+        {[1, 2, 3, 4, 5].map((s) => (
+          <span
+            key={s}
+            className={`h-1.5 rounded-full transition-all duration-300 ${
+              s === step
+                ? 'w-6 bg-emerald-400'
+                : s < step
+                ? 'w-1.5 bg-emerald-500/50'
+                : 'w-1.5 bg-slate-700'
+            }`}
+          />
+        ))}
+      </div>
     </div>
   );
 };
