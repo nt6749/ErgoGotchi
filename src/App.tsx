@@ -62,7 +62,17 @@ import {
   type Events,
   type Journal,
 } from './dev2_mascot_and_ui/journal';
-import { BUTTON_NEUTRAL, BUTTON_PRIMARY, loadTheme, PAGE, saveTheme, type ThemeMode } from './dev2_mascot_and_ui/theme';
+import {
+  BUTTON_NEUTRAL,
+  BUTTON_PRIMARY,
+  loadTheme,
+  PAGE,
+  saveTheme,
+  THEME_CYCLE_ORDER,
+  THEME_STORAGE_KEY,
+  THEMES,
+  type ThemeMode,
+} from './dev2_mascot_and_ui/theme';
 
 interface ElectronAPI {
   isElectron: boolean;
@@ -192,14 +202,20 @@ export const App: React.FC = () => {
   const [events, setEvents] = useState<Events>(() => loadEvents());
   const changeEvents = (change: (events: Events) => Events) => setEvents(updateEvents(change));
 
-  // Dashboard light / dark mode
+  // Aesthetic Theme State (Sanrio Pastel, Kuromi Gothic, Midnight Classic, Daylight Cream)
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const toggleTheme = () =>
     setTheme((mode) => {
-      const next: ThemeMode = mode === 'dark' ? 'light' : 'dark';
+      const idx = THEME_CYCLE_ORDER.indexOf(mode);
+      const next = THEME_CYCLE_ORDER[(idx + 1) % THEME_CYCLE_ORDER.length];
       saveTheme(next);
       return next;
     });
+
+  const handleSelectTheme = (mode: ThemeMode) => {
+    setTheme(mode);
+    saveTheme(mode);
+  };
 
   /** Feed the pet the corn it needs to level up. Returns false if there isn't enough corn. */
   const handleFeed = (): boolean => {
@@ -682,6 +698,7 @@ export const App: React.FC = () => {
       if (e.key === PET_STORAGE_KEY) setPet(loadPet());
       else if (e.key === JOURNAL_STORAGE_KEY) setJournal(loadJournal());
       else if (e.key === EVENTS_STORAGE_KEY) setEvents(loadEvents());
+      else if (e.key === THEME_STORAGE_KEY) setTheme(loadTheme());
     };
     window.addEventListener('storage', onStorage);
 
@@ -884,6 +901,7 @@ export const App: React.FC = () => {
           onEventsChange={changeEvents}
           theme={theme}
           onToggleTheme={toggleTheme}
+          onSelectTheme={handleSelectTheme}
           difficulty={difficulty}
           onSetDifficulty={handleSetDifficulty}
           isPresent={isPresent}
@@ -914,6 +932,10 @@ export const App: React.FC = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button onClick={toggleTheme} className={`${BUTTON_NEUTRAL} flex items-center gap-1.5`} title="Cycle theme">
+            <span>{THEMES.find((t) => t.id === theme)?.icon ?? '🌸'}</span>
+            <span>{THEMES.find((t) => t.id === theme)?.label ?? 'Theme'}</span>
+          </button>
           <button onClick={() => setShowWizard(true)} className={BUTTON_NEUTRAL}>
             Setup wizard 🪄
           </button>

@@ -21,6 +21,15 @@ const FEED_CORN_FROM = [
   [-46, -40], [0, -56], [46, -40], [-30, -62], [30, -62],
 ];
 
+/** Floating hearts & sparkles burst when the pet is fed or cheered. */
+const HEART_BURST_OFFSETS = [
+  { dx: -28, dy: -46, rot: -18, char: '♡' },
+  { dx: 0, dy: -58, rot: 8, char: '✨' },
+  { dx: 28, dy: -44, rot: 20, char: '♡' },
+  { dx: -14, dy: -66, rot: -10, char: '✧' },
+  { dx: 16, dy: -62, rot: 14, char: '🌸' },
+];
+
 /**
  * The Electron pet window ignores the mouse (clicks fall through to the desktop) except while
  * the pointer is over the pet or its speech bubble.
@@ -101,6 +110,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
   // Feeding feedback: a burst of corn flying in, or a "not enough" shake
   const [feedBurst, setFeedBurst] = useState<number | null>(null);
+  const [heartBurst, setHeartBurst] = useState<number | null>(null);
   const [refused, setRefused] = useState(false);
   const [typedText, setTypedText] = useState('');
   const [posX, setPosX] = useState(0);
@@ -389,9 +399,11 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
       const id = Date.now();
       setIsPetting(true);
       setFeedBurst(id);
+      setHeartBurst(id);
       soundEffects.playEat();
       later(() => setIsPetting(false), 600);
       later(() => setFeedBurst((b) => (b === id ? null : b)), 700);
+      later(() => setHeartBurst((b) => (b === id ? null : b)), 950);
     } else {
       setRefused(true);
       soundEffects.playRefuse();
@@ -409,12 +421,12 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         transition: isDragging ? 'none' : 'transform 0.1s ease-out',
       }}
     >
-      {/* Dynamic Comic Speech Bubble */}
+      {/* Dynamic Comic Speech Bubble with Aesthetic Sanrio-Pop styling */}
       {speechText && (
-        <div {...captureMouse} className="animate-bounce-in mb-3 w-48 bg-white text-black p-3 rounded-2xl border-2 border-black shadow-[3px_3px_0_0_#000] relative z-50">
+        <div {...captureMouse} className="animate-pop-spring mb-3 w-52 bg-white/98 text-neutral-900 p-3.5 rounded-3xl border-2 border-pink-300 shadow-[0_8px_20px_-4px_rgba(244,114,182,0.35)] relative z-50 backdrop-blur-sm">
           <button
             onClick={onDismissSpeech}
-            className="absolute -top-2.5 -right-2.5 bg-yellow-400 hover:bg-yellow-300 text-black font-black rounded-full w-5 h-5 flex items-center justify-center text-xs border-2 border-black"
+            className="absolute -top-2 -right-2 bg-pink-400 hover:bg-pink-500 hover:rotate-90 text-white font-black rounded-full w-5 h-5 flex items-center justify-center text-xs border-2 border-white shadow transition-all duration-200"
             title="Dismiss"
           >
             ×
@@ -422,18 +434,20 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
           
           {speechCue && speechCue !== 'NONE' && (
             <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-yellow-400 text-black border border-black">
-                {speechCue.replace('_', ' ')}
+              <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-gradient-to-r from-pink-400 to-rose-400 text-white shadow-sm flex items-center gap-1">
+                <span>🎀</span>
+                <span>{speechCue.replace('_', ' ')}</span>
               </span>
             </div>
           )}
 
-          <p className="text-xs font-semibold leading-relaxed text-black">
+          <p className="text-xs font-semibold leading-relaxed text-neutral-800">
             {typedText}
           </p>
 
           {/* Bubble tail arrow */}
-          <div className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-t-[9px] border-t-black" />
+          <div className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-t-[9px] border-t-pink-300" />
+          <div className="absolute -bottom-[7px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[7px] border-t-white" />
         </div>
       )}
 
@@ -465,21 +479,22 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         }}
         title="Drag anywhere to move · Click to feed · Double-click for Dashboard"
         className={`transition-transform duration-150 relative select-none ${
-          isDragging ? 'cursor-grabbing scale-105 drop-shadow-xl' : 'cursor-grab hover:scale-102'
-        } ${isReviving ? 'animate-backflip' : ''} ${isPetting ? 'scale-110' : ''} ${
+          isDragging ? 'cursor-grabbing scale-105 drop-shadow-xl' : 'cursor-grab hover:scale-105'
+        } ${isReviving ? 'animate-backflip' : ''} ${isPetting ? 'animate-jelly' : ''} ${
           flashing ? 'animate-level-flash' : ''
         } ${refused ? 'animate-knife-shake' : ''}`}
         style={{
           transform: `translateX(${posX}px) scaleX(${direction})`,
         }}
       >
-        {/* Cute Draggable Indicator Hint when hovered */}
+        {/* Cute Poppy Draggable Indicator Hint when hovered */}
         {hovered && !isDragging && !banner && (
           <div
-            className={`absolute ${(alwaysShowCorn || hovered) && pet ? '-top-16' : '-top-7'} left-1/2 -translate-x-1/2 pointer-events-none z-50 whitespace-nowrap px-2 py-0.5 rounded-full bg-black/80 text-yellow-300 text-[10px] font-mono tracking-wide border border-yellow-400/50 shadow-md flex items-center gap-1 opacity-95 transition-all duration-200`}
+            className={`absolute ${(alwaysShowCorn || hovered) && pet ? '-top-16' : '-top-7'} left-1/2 -translate-x-1/2 pointer-events-none z-50 whitespace-nowrap px-2.5 py-0.5 rounded-full bg-pink-500/90 text-white text-[10px] font-bold tracking-wide border border-pink-300 shadow-md flex items-center gap-1.5 opacity-95 transition-all duration-200 animate-pop-spring`}
           >
-            <span>✥</span>
-            <span>drag to move</span>
+            <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
+            <span>drag me anywhere</span>
+            <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
           </div>
         )}
 
@@ -499,7 +514,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
               </span>
             ))}
             <div className="absolute -top-7 left-1/2 -translate-x-1/2">
-              <div className="animate-level-banner whitespace-nowrap px-2.5 py-1 rounded-full bg-yellow-400 text-black text-[11px] font-black uppercase tracking-wide border-2 border-black shadow-[2px_2px_0_0_#000]">
+              <div className="animate-level-banner whitespace-nowrap px-3 py-1 rounded-full bg-gradient-to-r from-pink-400 to-rose-400 text-white text-[11px] font-black uppercase tracking-wide border-2 border-white shadow-md">
                 {banner.text}
               </div>
             </div>
@@ -508,7 +523,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         {cornPops.map((pop) => (
           <span
             key={pop.id}
-            className="absolute -top-1 right-0 pointer-events-none z-30 text-[11px] font-black text-black animate-xp-float whitespace-nowrap px-1 rounded bg-yellow-400 border border-black"
+            className="absolute -top-1 right-0 pointer-events-none z-30 text-[11px] font-black text-white animate-xp-float whitespace-nowrap px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 border border-white shadow-sm"
           >
             +{pop.amount} 🌽
           </span>
@@ -529,24 +544,46 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
           </div>
         )}
 
+        {/* Floating Heart / Sparkle Burst on Love & Feeding */}
+        {heartBurst !== null && (
+          <div key={heartBurst} className="absolute inset-0 pointer-events-none z-40">
+            {HEART_BURST_OFFSETS.map((h, i) => (
+              <span
+                key={i}
+                className="absolute left-1/2 top-1/2 text-pink-500 font-bold text-sm animate-heart-burst"
+                style={{
+                  ['--hx' as any]: `${h.dx}px`,
+                  ['--hy' as any]: `${h.dy}px`,
+                  ['--hrot' as any]: `${h.rot}deg`,
+                  animationDelay: `${i * 70}ms`,
+                }}
+              >
+                {h.char}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Corn status card: always shown if enabled (default), or shown on hover */}
         {pet && (alwaysShowCorn || hovered) && !banner && (
-          <div className="absolute -top-10 left-1/2 -translate-x-1/2 pointer-events-none z-40 whitespace-nowrap text-center px-2 py-1 rounded-lg bg-white border-2 border-black shadow-[2px_2px_0_0_#000] transition-opacity duration-200">
-            <div className={`text-[12px] font-black leading-tight ${enoughCorn ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {profile.corn}/{need} 🌽
+          <div className="absolute -top-11 left-1/2 -translate-x-1/2 pointer-events-none z-40 whitespace-nowrap text-center px-3 py-1 rounded-2xl bg-white/95 backdrop-blur-sm border-2 border-pink-300 shadow-[0_4px_12px_rgba(244,114,182,0.25)] transition-all duration-200 animate-pop-spring">
+            <div className={`text-[12px] font-black leading-tight flex items-center justify-center gap-1 ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
+              <span>🌽</span>
+              <span>{profile.corn}/{need}</span>
+              {enoughCorn && <span className="text-[10px] bg-pink-100 text-pink-700 px-1.5 py-0.2 rounded-full border border-pink-200 font-bold">FEED!</span>}
             </div>
-            <div className="text-[9px] font-semibold text-neutral-700 leading-tight">
-              {enoughCorn ? `Click to feed ${profile.name}` : `${need - profile.corn} more to level up`}
+            <div className="text-[9px] font-bold text-neutral-500 leading-tight">
+              {enoughCorn ? `Click to feed ${profile.name} ✨` : `${need - profile.corn} more to level up`}
             </div>
           </div>
         )}
       </div>
 
-      {/* Micro Health Bar under Mascot */}
-      <div className="w-20 bg-white rounded-full h-2 mt-2 border-2 border-black overflow-hidden">
+      {/* Micro Health Bar under Mascot with smooth pastel gradient */}
+      <div className="w-24 bg-white/90 rounded-full h-2 mt-2 border-2 border-pink-200 shadow-sm overflow-hidden p-0.5">
         <div
-          className={`h-full transition-all duration-500 ${
-            hp >= 80 ? 'bg-emerald-500' : hp >= 40 ? 'bg-yellow-400' : 'bg-rose-500'
+          className={`h-full rounded-full transition-all duration-500 ${
+            hp >= 80 ? 'bg-gradient-to-r from-emerald-400 to-teal-400' : hp >= 40 ? 'bg-gradient-to-r from-amber-400 to-yellow-400' : 'bg-gradient-to-r from-rose-400 to-pink-500'
           }`}
           style={{ width: `${Math.max(4, hp)}%` }}
         />
@@ -554,15 +591,15 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
       {/* Level, corn progress towards the next level, and the pantry */}
       {pet && (
-        <div className="flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full bg-white border-2 border-black">
-          <span className="text-[9px] font-black text-black leading-none">Lv {profile.level}</span>
-          <div className="w-10 bg-neutral-200 rounded-full h-1.5 border border-black overflow-hidden">
+        <div className="flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-full bg-white/95 border-2 border-pink-200 shadow-sm text-neutral-800">
+          <span className="text-[9px] font-black leading-none text-pink-600">Lv {profile.level}</span>
+          <div className="w-12 bg-pink-100 rounded-full h-1.5 border border-pink-200 overflow-hidden">
             <div
-              className={`h-full transition-all duration-500 ${enoughCorn ? 'bg-emerald-500' : 'bg-yellow-400'}`}
+              className={`h-full rounded-full transition-all duration-500 ${enoughCorn ? 'bg-gradient-to-r from-pink-400 to-rose-500' : 'bg-gradient-to-r from-yellow-400 to-amber-400'}`}
               style={{ width: `${Math.max(3, Math.min(1, profile.corn / need) * 100)}%` }}
             />
           </div>
-          <span className={`text-[9px] font-black leading-none ${enoughCorn ? 'text-emerald-600' : 'text-black'}`}>
+          <span className={`text-[9px] font-black leading-none ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
             🌽{profile.corn}
           </span>
         </div>

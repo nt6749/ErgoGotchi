@@ -180,10 +180,122 @@
   .animate-pulse-subtle {
     animation: pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
+
+  /* Poppy jelly squash and stretch for clicks and interactions */
+  @keyframes jellyBounce {
+    0% { transform: scale(1, 1); }
+    25% { transform: scale(1.18, 0.82); }
+    50% { transform: scale(0.9, 1.12); }
+    75% { transform: scale(1.05, 0.96); }
+    100% { transform: scale(1, 1); }
+  }
+
+  /* Bouncy pop-in for badges and modals */
+  @keyframes popSpring {
+    0% { transform: scale(0.6) rotate(-3deg); opacity: 0; }
+    60% { transform: scale(1.08) rotate(1deg); opacity: 1; }
+    80% { transform: scale(0.96) rotate(-0.5deg); }
+    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  }
+
+  /* Dreamy gentle float for stickers and mascot badges */
+  @keyframes floatGentle {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+  }
+
+  /* Sparkling star spin */
+  @keyframes sparkleSpin {
+    0% { transform: scale(0.8) rotate(0deg); opacity: 0.6; }
+    50% { transform: scale(1.2) rotate(180deg); opacity: 1; }
+    100% { transform: scale(0.8) rotate(360deg); opacity: 0.6; }
+  }
+
+  /* Floating hearts burst when loving or feeding the pet */
+  @keyframes heartBurst {
+    0% { transform: translate(0, 0) scale(0.4) rotate(0deg); opacity: 0; }
+    20% { opacity: 1; }
+    100% { transform: translate(var(--hx, 0px), var(--hy, -36px)) scale(1.2) rotate(var(--hrot, 15deg)); opacity: 0; }
+  }
+
+  /* Soft pulsing aura */
+  @keyframes pulseGlow {
+    0%, 100% { filter: drop-shadow(0 0 4px var(--accent)); }
+    50% { filter: drop-shadow(0 0 12px var(--accent)); }
+  }
+
+  .animate-jelly {
+    animation: jellyBounce 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+  }
+
+  .animate-pop-spring {
+    animation: popSpring 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+
+  .animate-float-gentle {
+    animation: floatGentle 2.6s ease-in-out infinite;
+  }
+
+  .animate-sparkle-spin {
+    animation: sparkleSpin 3s linear infinite;
+  }
+
+  .animate-heart-burst {
+    animation: heartBurst 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .animate-pulse-glow {
+    animation: pulseGlow 2.2s ease-in-out infinite;
+  }
 }
 
-/* Dashboard theme colours (see theme.ts). Dark is the default; data-theme="light" switches. */
-[data-theme] {
+/* Dashboard themes (see theme.ts)
+ * Default fallback (Sanrio Pastel: sweet strawberry milk, marshmallow cloud cards, Japanese stationery ink)
+ */
+[data-theme],
+[data-theme='sanrio'] {
+  --bg: #fff1f5;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --chip: #fce7f3;
+  --line: #fbcfe8;
+  --track: #fce7f3;
+  --ink: #3b1d32;
+  --muted: #835372;
+  --faint: #b58aa6;
+  --accent: #ff5c8a;
+  --accent-ink: #ffffff;
+  --accent-soft: #ffe4ec;
+  --good: #10b981;
+  --bad: #f43f5e;
+  --warn: #f59e0b;
+  --shadow-pop: 0 10px 25px -4px rgba(244, 114, 182, 0.22), 0 4px 10px -2px rgba(0, 0, 0, 0.03);
+  --btn-shadow: 0 3px 0 0 #f472b6;
+  color-scheme: light;
+}
+
+[data-theme='kuromi'] {
+  --bg: #120d1c;
+  --surface: #1a1329;
+  --card: #231a38;
+  --chip: #2f234a;
+  --line: #453368;
+  --track: #2f234a;
+  --ink: #fdf8fe;
+  --muted: #b5a3d4;
+  --faint: #7f6aa5;
+  --accent: #ec4899;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(236, 72, 153, 0.16);
+  --good: #34d399;
+  --bad: #fb7185;
+  --warn: #fbbf24;
+  --shadow-pop: 0 10px 30px -4px rgba(236, 72, 153, 0.28), 0 0 14px rgba(168, 85, 247, 0.18);
+  --btn-shadow: 0 3px 0 0 #db2777;
+  color-scheme: dark;
+}
+
+[data-theme='dark'] {
   --bg: #0e0e0e;
   --surface: #151515;
   --card: #1a1a1a;
@@ -199,6 +311,8 @@
   --good: #4ade80;
   --bad: #f87171;
   --warn: #f59e0b;
+  --shadow-pop: 0 10px 25px -4px rgba(0, 0, 0, 0.6);
+  --btn-shadow: 0 3px 0 0 #ca8a04;
   color-scheme: dark;
 }
 
@@ -218,6 +332,8 @@
   --good: #2f9e5b;
   --bad: #dc2626;
   --warn: #d97706;
+  --shadow-pop: 0 10px 25px -4px rgba(0, 0, 0, 0.08);
+  --btn-shadow: 0 3px 0 0 #b45309;
   color-scheme: light;
 }
 
