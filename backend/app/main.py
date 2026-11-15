@@ -275,7 +275,7 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
                             "Telemetry buffer reached capacity (%d); dropping oldest record to prevent memory growth.",
                             len(telemetry_buffer)
                         )
-                        telemetry_buffer.pop(0)
+                        telemetry_buffer.popleft()
                     telemetry_buffer.append(record)
 
             # Contract 2: Intervention Request (when a posture trigger fires)

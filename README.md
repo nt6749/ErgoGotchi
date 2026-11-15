@@ -18,10 +18,10 @@
 
 | Platform | Recommended Installer | Alternative / Portable | Status |
 | :--- | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.2 Ready` |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 All Release Assets](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.2 Ready` |
+| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.3 Ready` |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 All Release Assets](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.3 Ready` |
 
-> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.2.exe`), Portable (`ErgoGotchi-Portable-1.0.2.exe`), and macOS Disk Image (`ErgoGotchi-1.0.2.dmg`).
+> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.3.exe`), Portable (`ErgoGotchi-Portable-1.0.3.exe`), and macOS Disk Image (`ErgoGotchi-1.0.3.dmg`).
 
 ---
 
@@ -77,13 +77,21 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
 
 ---
 
-## ✨ Latest Release Highlights & Native Capabilities (v1.0.2)
+## ✨ Latest Release Highlights & Native Capabilities (v1.0.3)
 
-- 🌽 **Always-On Corn Progress Overlay**: Keep your duck's corn count and level-up requirements pinned above your pet at all times! Enabled by default, with a toggle in Dashboard Settings and the right-click menu to switch back to show-on-hover mode if you prefer a minimal look.
-- 📍 **Free-Floating Draggable Pet**: Don't want your pet in the bottom-right corner? Click and drag your duck anywhere across your screens and workspace! It automatically saves its position across sessions, with a quick **"📌 Dock Pet to Corner"** option in the right-click menu and Companion Dashboard settings.
-- 🔄 **In-App GitHub Auto-Updater**: When ErgoGotchi launches, it quietly checks GitHub Releases for new updates. If an update is detected, a sleek update banner appears with a direct **Restart & Update** button, downloading and launching the update seamlessly in one click. Configurable in Companion Dashboard settings (toggle auto-updates or click "Check for Updates" manually).
-- 🚀 **Launch at System Startup**: Prefer ErgoGotchi to greet you whenever your PC turns on? Toggle **"Launch ErgoGotchi on system startup"** directly in Dashboard Settings (`openAtLogin` integration).
-- 📹 **Live Vision Diagnostics & Camera Viewfinder**: High-speed live webcam preview built into the Companion Dashboard. Switch cameras, toggle mirror preview, and run the 5-second upright posture calibration with visual real-time facial landmark and shoulder tracking overlays.
+- 🥚 **Classic Eggshell Virtual Pet Casing & Wardrobe Skins**: Experience ErgoGotchi in an authentic vintage handheld virtual pet device! Features a physical eggshell enclosure with metallic chain link, speaker grill perforations, starburst bezel, and 6 collectible casing skins: *Classic Sunshine Yellow, Cosmic Midnight Moon & Stars, Pastel Rainbow Candy, Fresh Avocado Gingham, Kuromi Dark Lavender, and Retro Teal*.
+- 🎮 **3 Classic Physical Hardware Buttons**:
+  - **Button A (Pet 💖)**: Pet your duck at any time! Triggers a happy chime, joyful jelly bounce, and a burst of floating hearts and sparkles.
+  - **Button B (Feed 🌽)**: Feed your duck with earned corn to boost happiness and level up.
+  - **Button C (Lock / Move 🔒)**: One-click position lock. Lock your pet in place so clicks won't move it, or click to unlock and freely drag the egg machine anywhere across your monitors.
+- 🌸 **Aesthetic Theme Engine (Sanrio Pastel & Kuromi Gothic Pop)**: Brand new theme system with real-time swatch cards in Settings and a top-bar cycle pill:
+  - **Sanrio Pastel 🌸**: Strawberry milk blush, marshmallow cloud surfaces, pastel pinks, and warm plum ink.
+  - **Kuromi Gothic Pop 🎀**: Midnight purple velvet, electric neon pink & mint accents, and dark aesthetic styling.
+  - **Midnight Dark 🌙** & **Daylight Cream ☀️**: Clean ergonomic high-contrast dark and light modes.
+- 💫 **Poppy Jelly Physics & Centered Overlays**: Fluid squash-and-stretch jelly bounce (`animate-jelly`), gentle floating levitation, and isolated layout coordinates ensuring corn counts, XP popups, and draggable hints stay centered over your pet companion.
+- 🌽 **Streamlined Corn Level Display**: The corn level indicator now defaults to clean and minimal (revealing automatically on hover), with an option in Settings to keep it pinned at all times.
+- 🔄 **Companion Dashboard Auto-Updater**: ErgoGotchi checks GitHub Releases for new versions and cleanly displays updates right inside the Companion Dashboard with a one-click **"Update & Restart 🚀"** workflow.
+- 🚀 **System Startup Launch Support**: Auto-launch ErgoGotchi on boot via `openAtLogin` with clear desktop environment notices.
 
 ---
 
@@ -95,7 +103,7 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
 | 💼 **Future of Work** | JFFVentures (Stream Decks + VC Pitch) | Privacy-preserving edge biometrics: zero video egress (frames processed in RAM and discarded); uses relative deviation from the user's calibrated baseline to prevent fatigue without HR surveillance. |
 | ♊ **Best Use of Gemini API** | MLH Swag Kits & Honors | Gemini powers the pet’s personality engine with structured JSON responses, serving snappy, context-aware roasts and clinically grounded micro-stretch biomechanical cues. |
 | 🐅 **Best Use of Tiger Data** | Stream Deck Mini | Ingests continuous 1 Hz telemetry into PostgreSQL hypertables; leverages `timescaledb.continuous` 1-minute materialized views (`ergo_1min`) and `LAG()` window functions to compute real-time strain velocity. |
-| 🎮 **Best Gaming** | Gaming Track | Tamagotchi survival gameplay: 0–100 HP decay curve, level-ups, posture discipline XP, and death/revival state mechanics. |
+| 🎮 **Best Gaming** | Gaming Track | Virtual pet survival gameplay: 0–100 HP decay curve, level-ups, posture discipline XP, and death/revival state mechanics. |
 | ☁️ **Best Use of Vultr** | IoT Kit / Cloud Awards | Full Docker Compose deployment blueprint provisioning TimescaleDB and the FastAPI telemetry service on Vultr High-Frequency Compute. |
 | 🚀 **SpaceXSI A-Team** | Mechanical Keyboards | Automated Grok Bot webhook service generating personal, opt-in daily focus and posture summaries in Discord/Slack. |
 

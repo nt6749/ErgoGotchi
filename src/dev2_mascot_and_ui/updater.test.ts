@@ -2,9 +2,15 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { compareVersions } = require('../../electron/updater.cjs');
+const { compareVersions, getAppVersion } = require('../../electron/updater.cjs');
 
 describe('Auto-Updater semver comparison', () => {
+  it('returns package.json version rather than electron binary version', () => {
+    const version = getAppVersion();
+    expect(version).toBe('1.0.3');
+    expect(version.startsWith('33.')).toBe(false);
+  });
+
   it('detects newer minor and patch releases', () => {
     expect(compareVersions('v1.0.2', 'v1.0.1')).toBe(1);
     expect(compareVersions('v1.1.0', 'v1.0.9')).toBe(1);

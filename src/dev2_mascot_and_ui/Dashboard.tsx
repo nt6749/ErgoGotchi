@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { DifficultyLevel, PetState, UpdateInfo, UpdateProgress } from '../types';
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal, recordDebriefReward, updateJournal } from './journal';
 import { MyDuck } from './MyDuck';
+import { DEFAULT_SKIN, type EggShellSkin } from './eggShellSkins';
 import { CameraScreen } from './CameraScreen';
 import type { CameraStatus, VisionLandmarks } from '../dev1_sensing_and_scoring/visionPipeline';
 import type { ForcedActivity } from './PixelMascot';
@@ -44,8 +45,10 @@ import {
   LABEL,
   MUTED,
   PANEL,
+  THEMES,
   TRACK,
   type ThemeMode,
+  type ThemeOption,
 } from './theme';
 
 interface CameraChoice {
@@ -93,9 +96,18 @@ interface DashboardProps {
   events?: Events;
   onEventsChange?: (change: (events: Events) => Events) => void;
 
-  // Light / dark mode
+  // Aesthetic themes
   theme?: ThemeMode;
   onToggleTheme?: () => void;
+  onSelectTheme?: (theme: ThemeMode) => void;
+
+  // Position lock mode
+  isLocked?: boolean;
+  onToggleLock?: (locked: boolean) => void;
+
+  // Egg Shell Skin
+  skin?: EggShellSkin;
+  onSelectSkin?: (skin: EggShellSkin) => void;
 
   // Difficulty setting
   difficulty?: DifficultyLevel;
@@ -184,8 +196,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   journal = NEW_JOURNAL,
   events = NEW_EVENTS,
   onEventsChange = () => {},
-  theme = 'dark',
+  theme = 'sanrio',
   onToggleTheme,
+  onSelectTheme,
+  isLocked = true,
+  onToggleLock,
+  skin = DEFAULT_SKIN,
+  onSelectSkin,
   difficulty,
   onSetDifficulty,
   isPresent = true,
@@ -223,9 +240,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('ergogotchi.alwaysShowCorn') !== 'false';
+      return localStorage.getItem('ergogotchi.alwaysShowCorn') === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -243,7 +260,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'ergogotchi.alwaysShowCorn') {
-        setAlwaysShowCorn(e.newValue !== 'false');
+        setAlwaysShowCorn(e.newValue === 'true');
       }
     };
     const handleCustom = (e: any) => {
@@ -448,9 +465,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* Bar 1: buttons */}
       <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 bg-[var(--surface)] border-b border-[var(--line)]">
         <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-xl bg-[var(--accent)] flex items-center justify-center text-xl">🦆</span>
+          <div className="relative group">
+            <span className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-[var(--accent)] to-rose-300 flex items-center justify-center text-2xl shadow-md border-2 border-[var(--line)] animate-float-gentle">
+              🦆
+            </span>
+            <span className="absolute -top-1 -right-1 text-xs animate-sparkle-spin select-none">✧</span>
+          </div>
           <div className="leading-tight">
-            <h1 className="text-base font-bold tracking-tight">ErgoGotchi</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-black tracking-tight text-[var(--ink)]">ErgoGotchi</h1>
+              <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] shadow-xs animate-pop-spring">
+                Aesthetic ✨
+              </span>
+            </div>
             <p className={`text-[11px] ${MUTED}`}>{pet.name}'s companion dashboard</p>
           </div>
         </div>
@@ -460,7 +487,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             className={`${BUTTON_NEUTRAL} flex items-center gap-2 cursor-default hover:!border-[var(--line)]`}
             title={isConnected ? 'Connected to the telemetry server' : 'Server offline: using built-in lines'}
           >
-            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[var(--good)]' : 'bg-[var(--warn)]'}`} />
+            <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-[var(--good)] shadow-[0_0_8px_var(--good)]' : 'bg-[var(--warn)]'}`} />
             {isConnected ? 'Live' : 'Offline'}
           </span>
 
@@ -489,11 +516,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {onToggleTheme && (
             <button
               onClick={onToggleTheme}
-              className={BUTTON_NEUTRAL}
-              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className={`${BUTTON_NEUTRAL} flex items-center gap-1.5`}
+              title="Click to cycle themes: Sanrio Pastel 🌸 · Kuromi Gothic 🎀 · Midnight 🌙 · Daylight ☀️"
+              aria-label="Cycle theme"
             >
-              {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+              <span className="text-sm">{THEMES.find((t) => t.id === theme)?.icon ?? '🌸'}</span>
+              <span>{THEMES.find((t) => t.id === theme)?.label ?? 'Theme'}</span>
             </button>
           )}
           {onHide && (
@@ -504,23 +532,64 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </header>
 
-      {/* Bar 2: tabs */}
-      <nav className="flex flex-wrap px-4 bg-[var(--surface)] border-b border-[var(--line)]">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            aria-pressed={activeTab === tab.id}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-              activeTab === tab.id
-                ? 'border-[var(--accent)] text-[var(--accent)]'
-                : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)]'
-            }`}
-          >
-            <span>{tab.icon}</span>
-            {tab.label}
-          </button>
-        ))}
+      {/* Update Available Notification Banner on Main Dashboard */}
+      {checkResult?.updateAvailable && !isUpdating && (
+        <div className="bg-gradient-to-r from-cyan-500/15 via-sky-500/15 to-blue-500/15 border-b border-cyan-400/40 px-5 py-2.5 flex flex-wrap items-center justify-between gap-3 backdrop-blur-sm animate-fade-in select-none">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl animate-pulse select-none">⚡</span>
+            <div>
+              <span className="text-xs font-bold text-[var(--ink)] flex items-center gap-2">
+                <span>ErgoGotchi {checkResult.latestVersion} is available!</span>
+                <span className="text-[10px] bg-cyan-400/20 text-cyan-600 dark:text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-400/30 font-bold uppercase">
+                  New Release
+                </span>
+              </span>
+              <p className={`text-[11px] ${MUTED}`}>
+                Click to download and restart ErgoGotchi with the latest features.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onTriggerUpdate?.(checkResult.asset)}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-cyan-400 hover:bg-cyan-300 text-slate-950 transition active:scale-95 shadow-md flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <span>Update & Restart</span>
+              <span>🚀</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCheckResult((prev) => (prev ? { ...prev, updateAvailable: false } : null))}
+              className="text-xs text-[var(--muted)] hover:text-[var(--ink)] p-1 rounded-lg hover:bg-[var(--chip)] transition cursor-pointer"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bar 2: aesthetic pill tabs */}
+      <nav className="flex flex-wrap items-center gap-1.5 px-5 py-2.5 bg-[var(--surface)] border-b border-[var(--line)]">
+        {TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              aria-pressed={isActive}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-2xl transition-all duration-200 active:scale-95 ${
+                isActive
+                  ? 'bg-[var(--accent)] text-[var(--accent-ink)] shadow-md scale-[1.02] border-2 border-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--chip)] border-2 border-transparent'
+              }`}
+            >
+              <span className={isActive ? 'animate-bounce-slow text-sm' : 'text-sm'}>{tab.icon}</span>
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </nav>
 
       {/* Tab content */}
@@ -669,7 +738,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* My DuckDuck: profile + wardrobe */}
           {activeTab === 'myduck' && (
-            <MyDuck pet={pet} onPetChange={onPetChange} onFeed={onFeed} cornEverySeconds={cornInterval(isDemoMode)} />
+            <MyDuck
+              pet={pet}
+              onPetChange={onPetChange}
+              onFeed={onFeed}
+              cornEverySeconds={cornInterval(isDemoMode)}
+              isLocked={isLocked}
+              onToggleLock={onToggleLock}
+              skin={skin}
+              onSelectSkin={onSelectSkin}
+            />
           )}
 
           {/* Quests: daily quests, games, achievements, session report, stretches */}
@@ -883,6 +961,68 @@ GROUP BY bucket, session_id;`}</pre>
 
           {activeTab === 'settings' && (
             <div className="space-y-6">
+              {/* Aesthetic & Theme Experience Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl animate-sparkle-spin select-none">✨</span>
+                    <div>
+                      <h3 className="font-bold text-base flex items-center gap-2">
+                        <span>Aesthetic & Theme Experience</span>
+                      </h3>
+                      <p className={`text-xs ${MUTED}`}>
+                        Select your vibe: Sanrio pastel, Kuromi gothic pop, midnight classic, or warm daylight
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]">
+                    {THEMES.find((t) => t.id === theme)?.label || 'Theme'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                  {THEMES.map((t) => {
+                    const isSelected = theme === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          if (onSelectTheme) onSelectTheme(t.id);
+                          else if (onToggleTheme) onToggleTheme();
+                        }}
+                        className={`p-4 rounded-2xl border-2 text-left transition-all duration-200 relative overflow-hidden group active:scale-95 ${
+                          isSelected
+                            ? 'border-[var(--accent)] bg-[var(--accent-soft)] shadow-md scale-[1.02]'
+                            : `${PANEL} hover:border-[var(--accent)] hover:scale-[1.01]`
+                        }`}
+                      >
+                        <div className={`h-2.5 w-full rounded-full bg-gradient-to-r ${t.swatchBg} mb-3 shadow-xs`} />
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="font-bold text-sm flex items-center gap-1.5 text-[var(--ink)]">
+                            <span className="text-base">{t.icon}</span>
+                            <span>{t.label}</span>
+                          </span>
+                          {isSelected && (
+                            <span className="text-[10px] font-black text-[var(--accent)] bg-[var(--card)] px-1.5 py-0.5 rounded-full border border-[var(--accent)]">
+                              ACTIVE ✓
+                            </span>
+                          )}
+                        </div>
+                        <p className={`text-[11px] ${MUTED} leading-snug`}>
+                          {t.sublabel}
+                        </p>
+                        <div className="mt-2.5">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-[var(--muted)] bg-[var(--chip)] px-2 py-0.5 rounded-full border border-[var(--line)]">
+                            {t.badge}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className={`${CARD} p-5 space-y-4`}>
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-base flex items-center gap-2">
@@ -1073,7 +1213,7 @@ GROUP BY bucket, session_id;`}</pre>
                   <div className="flex items-center gap-2">
                     <span className="text-lg">🚀</span>
                     <div>
-                      <h3 className="font-bold text-base">Launch at System Startup</h3>
+                      <h3 className="font-bold text-base">Launch at System Startup (portable app not supported)</h3>
                       <p className={`text-xs ${MUTED}`}>Configure ErgoGotchi to start automatically when your PC boots</p>
                     </div>
                   </div>
@@ -1168,10 +1308,10 @@ GROUP BY bucket, session_id;`}</pre>
                 <label className={`${PANEL} p-3.5 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-600 transition`}>
                   <div className="space-y-0.5">
                     <div className="text-xs font-semibold text-[var(--ink)]">
-                      Always show corn level above pet
+                      Always show corn level
                     </div>
                     <div className={`text-[11px] ${MUTED}`}>
-                      When enabled (default), your corn count and level-up requirement stay visible above your pet at all times. If unchecked, the indicator only appears while hovering.
+                      When enabled, your corn count and level-up requirement stay visible above your pet at all times. By default (unchecked), the indicator only appears when your cursor hovers over the pet.
                     </div>
                   </div>
                   <input

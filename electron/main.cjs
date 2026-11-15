@@ -11,18 +11,25 @@ const http = require('http');
 const fs = require('fs');
 const { startActivityWatcher } = require('./activityWatcher.cjs');
 const {
+  getAppVersion,
   checkForUpdates,
   downloadAndInstallUpdate,
   getLoginItemSettings,
   setLoginItemSettings,
 } = require('./updater.cjs');
 
+try {
+  app.setName('ErgoGotchi');
+  app.setVersion(getAppVersion());
+} catch (e) {}
+
 let petWindow = null;
 let dashboardWindow = null;
 let backendProcess = null;
 let isWizardActive = false;
+let isPetLocked = true;
 let currentDifficulty = 'normal';
-let alwaysShowCorn = true;
+let alwaysShowCorn = false;
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
@@ -130,15 +137,23 @@ function createPetWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
 
-  // Room for the mascot's ±40px wander and the speech bubble above it
-  const initialWidth = 280;
-  const initialHeight = 320;
+  // Room for the egg machine and the speech bubble / update banner above it
+  const initialWidth = 340;
+  const initialHeight = 480;
   const defaultX = screenWidth - initialWidth - 60;
   const defaultY = screenHeight - initialHeight - 10;
 
+  // Use the saved spot only if it is still on a connected screen (a monitor may have been unplugged)
   const saved = getSavedPetPosition();
-  const initialX = saved && typeof saved.x === 'number' ? saved.x : defaultX;
-  const initialY = saved && typeof saved.y === 'number' ? saved.y : defaultY;
+  const savedOnScreen =
+    saved &&
+    screen.getAllDisplays().some(({ workArea: a }) => {
+      const cx = saved.x + initialWidth / 2;
+      const cy = saved.y + initialHeight / 2;
+      return cx >= a.x && cx <= a.x + a.width && cy >= a.y && cy <= a.y + a.height;
+    });
+  const initialX = savedOnScreen ? saved.x : defaultX;
+  const initialY = savedOnScreen ? saved.y : defaultY;
 
   petWindow = new BrowserWindow({
     icon: APP_ICON_PATH,
@@ -198,13 +213,24 @@ function createPetWindow() {
         click: () => createDashboardWindow(),
       },
       {
+        label: isPetLocked ? '🔓 Unlock Position (Move Duck)' : '🔒 Lock Position',
+        click: () => {
+          isPetLocked = !isPetLocked;
+          petWindow.webContents.send('menu-toggle-lock', isPetLocked);
+        },
+      },
+      {
+        label: '🌾 Feed Duck (🌽)',
+        click: () => petWindow.webContents.send('menu-feed-duck'),
+      },
+      {
         label: '📌 Dock Pet to Corner',
         click: () => {
           if (!petWindow) return;
           const primaryDisplay = screen.getPrimaryDisplay();
           const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
-          const initialWidth = 280;
-          const initialHeight = 320;
+          const initialWidth = 340;
+          const initialHeight = 480;
           const initialX = screenWidth - initialWidth - 60;
           const initialY = screenHeight - initialHeight - 10;
           petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
@@ -237,6 +263,7 @@ function createPetWindow() {
           }, 500);
         },
       },
+      { type: 'separator' },
       {
         label: '⚡ Toggle Demo Mode (D)',
         click: () => petWindow.webContents.send('menu-toggle-demo'),
@@ -299,22 +326,10 @@ function createPetWindow() {
       {
         label: '🥚 Growth',
         submenu: [
+          { label: 'Feed Duck (🌽)', click: () => petWindow.webContents.send('menu-feed-duck') },
           { label: 'Give 10 corn (demo)', click: () => petWindow.webContents.send('menu-add-corn', 10) },
           { label: 'Start over as an egg', click: () => petWindow.webContents.send('menu-reset-growth') },
         ],
-      },
-      { type: 'separator' },
-      {
-        label: 'Force State: Thriving [1]',
-        click: () => petWindow.webContents.send('menu-force-state', 'THRIVING'),
-      },
-      {
-        label: 'Force State: Slouching [2]',
-        click: () => petWindow.webContents.send('menu-force-state', 'SLOUCHING'),
-      },
-      {
-        label: 'Force State: Wilted [3]',
-        click: () => petWindow.webContents.send('menu-force-state', 'WILTED'),
       },
       { type: 'separator' },
       {
@@ -425,8 +440,8 @@ ipcMain.on('pet-dock-corner', () => {
   if (!petWindow) return;
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
-  const initialWidth = 280;
-  const initialHeight = 320;
+  const initialWidth = 340;
+  const initialHeight = 480;
   const initialX = screenWidth - initialWidth - 60;
   const initialY = screenHeight - initialHeight - 10;
   petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
@@ -442,6 +457,10 @@ ipcMain.on('set-always-show-corn', (event, show) => {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     dashboardWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
   }
+});
+
+ipcMain.on('pet-set-locked', (event, locked) => {
+  isPetLocked = !!locked;
 });
 
 ipcMain.on('pet-ignore-mouse', (event, ignore) => {
@@ -489,7 +508,7 @@ ipcMain.handle('set-login-item-settings', (event, openAtLogin) => {
 });
 
 ipcMain.handle('get-app-version', () => {
-  return app.getVersion();
+  return getAppVersion();
 });
 
 app.whenReady().then(async () => {

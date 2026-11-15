@@ -6,14 +6,14 @@ export function shouldDisplayCornOverlay(alwaysShow: boolean, hovered: boolean, 
 }
 
 export function parseAlwaysShowCornSetting(storedValue: string | null): boolean {
-  return storedValue !== 'false';
+  return storedValue === 'true';
 }
 
 describe('Corn Overlay Display Logic', () => {
-  it('defaults to true when no setting is saved in localStorage', () => {
-    expect(parseAlwaysShowCornSetting(null)).toBe(true);
-    expect(parseAlwaysShowCornSetting(undefined as any)).toBe(true);
-    expect(parseAlwaysShowCornSetting('')).toBe(true);
+  it('defaults to false when no setting is saved in localStorage', () => {
+    expect(parseAlwaysShowCornSetting(null)).toBe(false);
+    expect(parseAlwaysShowCornSetting(undefined as any)).toBe(false);
+    expect(parseAlwaysShowCornSetting('')).toBe(false);
   });
 
   it('correctly parses explicit true and false stored values', () => {

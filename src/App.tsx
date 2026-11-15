@@ -45,6 +45,7 @@ import {
   type PetProfile,
 } from './dev2_mascot_and_ui/progression';
 import { OnboardingWizard, ONBOARDING_STORAGE_KEY } from './dev2_mascot_and_ui/OnboardingWizard';
+import { DEFAULT_SKIN, loadStoredSkin, saveStoredSkin, SKIN_STORAGE_KEY, type EggShellSkin } from './dev2_mascot_and_ui/eggShellSkins';
 
 /** Posture warnings clear after this many consecutive seconds of good posture. */
 const CLEAR_WARNING_AFTER_GOOD_SECONDS = 2;
@@ -68,7 +69,17 @@ import {
   type Events,
   type Journal,
 } from './dev2_mascot_and_ui/journal';
-import { BUTTON_NEUTRAL, BUTTON_PRIMARY, loadTheme, PAGE, saveTheme, type ThemeMode } from './dev2_mascot_and_ui/theme';
+import {
+  BUTTON_NEUTRAL,
+  BUTTON_PRIMARY,
+  loadTheme,
+  PAGE,
+  saveTheme,
+  THEME_CYCLE_ORDER,
+  THEME_STORAGE_KEY,
+  THEMES,
+  type ThemeMode,
+} from './dev2_mascot_and_ui/theme';
 
 interface ElectronAPI {
   isElectron: boolean;
@@ -89,6 +100,9 @@ interface ElectronAPI {
   onSetDifficulty?: (cb: (level: DifficultyLevel) => void) => void;
   centerPet?: (width?: number, height?: number) => void;
   dockPet?: () => void;
+  onToggleLock?: (cb: (locked: boolean) => void) => void;
+  setLocked?: (locked: boolean) => void;
+  onFeedDuck?: (cb: () => void) => void;
   movePet?: (x: number, y: number, save?: boolean) => void;
   movePetBy?: (dx: number, dy: number, save?: boolean) => void;
   getPetPosition?: () => Promise<{ x: number; y: number }>;
@@ -120,6 +134,10 @@ type PresenterMessage =
   | { type: 'hello' }
   | { type: 'recalibrate' }
   | { type: 'warning' }
+  | { type: 'lock'; locked: boolean }
+  | { type: 'skin'; skin: EggShellSkin }
+  | { type: 'scoring'; state: PetState; hp: number; strainIndex?: number }
+  | { type: 'feed' }
   | { type: 'select_camera'; deviceId: string }
   | { type: 'preview_request'; active: boolean }
   | {
@@ -156,6 +174,10 @@ const electronAPI: ElectronAPI | undefined = (window as any).electronAPI;
 const isDashboardView = new URLSearchParams(window.location.search).get('view') === 'dashboard';
 // Electron's transparent pet window: render only the mascot, no browser demo chrome
 const isPetWindow = !!electronAPI?.isElectron && !isDashboardView;
+const captureMouse = {
+  onMouseEnter: () => electronAPI?.setIgnoreMouse?.(false),
+  onMouseLeave: () => electronAPI?.setIgnoreMouse?.(true),
+};
 
 // React StrictMode runs effects twice in dev; the camera must only be opened once
 let visionStarted = false;
@@ -202,6 +224,30 @@ export const App: React.FC = () => {
       return false;
     }
   });
+  const [isLocked, setIsLocked] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ergogotchi_pet_locked');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleLock = (locked: boolean) => {
+    setIsLocked(locked);
+    try {
+      localStorage.setItem('ergogotchi_pet_locked', String(locked));
+    } catch {}
+    electronAPI?.setLocked?.(locked);
+    presenterChannel?.postMessage({ type: 'lock', locked });
+  };
+
+  const [eggShellSkin, setEggShellSkin] = useState<EggShellSkin>(() => loadStoredSkin());
+  const handleSelectSkin = (skin: EggShellSkin) => {
+    setEggShellSkin(skin);
+    saveStoredSkin(skin);
+    presenterChannel?.postMessage({ type: 'skin', skin });
+  };
 
   // Scoring and biometric state
   const [scoringState, setScoringState] = useState<ScoringState>(createInitialState());
@@ -231,14 +277,20 @@ export const App: React.FC = () => {
   const [events, setEvents] = useState<Events>(() => loadEvents());
   const changeEvents = (change: (events: Events) => Events) => setEvents(updateEvents(change));
 
-  // Dashboard light / dark mode
+  // Aesthetic Theme State (Sanrio Pastel, Kuromi Gothic, Midnight Classic, Daylight Cream)
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const toggleTheme = () =>
     setTheme((mode) => {
-      const next: ThemeMode = mode === 'dark' ? 'light' : 'dark';
+      const idx = THEME_CYCLE_ORDER.indexOf(mode);
+      const next = THEME_CYCLE_ORDER[(idx + 1) % THEME_CYCLE_ORDER.length];
       saveTheme(next);
       return next;
     });
+
+  const handleSelectTheme = (mode: ThemeMode) => {
+    setTheme(mode);
+    saveTheme(mode);
+  };
 
   /** Feed the pet the corn it needs to level up. Returns false if there isn't enough corn. */
   const handleFeed = (): boolean => {
@@ -342,7 +394,11 @@ export const App: React.FC = () => {
 
     if (!visionStarted && (!isDashboardView || !electronAPI?.isElectron)) {
       visionStarted = true;
-      initVision();
+      if (awardsCorn) {
+        initVision();
+      } else {
+        refreshCameras();
+      }
     }
   }, []);
 
@@ -580,6 +636,10 @@ export const App: React.FC = () => {
 
   // 2. 1-Hz Scoring & Telemetry Dispatch Loop
   useEffect(() => {
+    // Only the primary window (pet window in Electron, or plain browser preview)
+    // runs the scoring & telemetry loop. The dashboard window receives synced scoring over IPC.
+    if (!awardsCorn) return;
+
     const loopInterval = setInterval(() => {
       // If this window is a secondary dashboard view receiving live telemetry from the desktop duck,
       // preserve the remote duck's live HP/strain instead of calculating locally without a camera
@@ -615,6 +675,12 @@ export const App: React.FC = () => {
       }
 
       setScoringState(next);
+      presenterChannel?.postMessage({
+        type: 'scoring',
+        state: next.state,
+        hp: next.hp,
+        strainIndex: next.strainIndex,
+      } satisfies PresenterMessage);
 
       // Sitting upright earns corn: one for every stretch of good posture
       if (awardsCorn) {
@@ -705,7 +771,14 @@ export const App: React.FC = () => {
 
   // Presenter controls: apply here and tell the other window
   const applyPresenter = (patch: Partial<PresenterState>) => {
-    if ('forcedState' in patch) setForcedState(patch.forcedState ?? null);
+    if ('forcedState' in patch) {
+      const s = patch.forcedState ?? null;
+      setForcedState(s);
+      if (s) {
+        const h = s === 'THRIVING' ? 95 : s === 'NEUTRAL' ? 75 : s === 'SLOUCHING' ? 45 : 15;
+        setScoringState((prev) => ({ ...prev, state: s, hp: h }));
+      }
+    }
     if (patch.forcedActivity) setForcedActivity(patch.forcedActivity);
     if (typeof patch.demoMode === 'boolean') {
       setIsDemoMode(patch.demoMode);
@@ -738,9 +811,31 @@ export const App: React.FC = () => {
     const onMessage = (e: MessageEvent<PresenterMessage>) => {
       const msg = e.data;
       if (msg.type === 'set') applyPresenter(msg.patch);
-      else if (msg.type === 'recalibrate') handleRecalibrate();
+      else if (msg.type === 'scoring') {
+        if (!awardsCorn) {
+          setScoringState((prev) => ({
+            ...prev,
+            state: msg.state,
+            hp: msg.hp,
+            strainIndex: msg.strainIndex ?? prev.strainIndex,
+          }));
+        }
+      }
+      else if (msg.type === 'recalibrate') {
+        if (awardsCorn) handleRecalibrate();
+      }
       else if (msg.type === 'warning') showWarning();
-      else if (msg.type === 'select_camera') {
+      else if (msg.type === 'lock') {
+        setIsLocked(msg.locked);
+        try {
+          localStorage.setItem('ergogotchi_pet_locked', String(msg.locked));
+        } catch {}
+      } else if (msg.type === 'feed') {
+        handleFeed();
+      } else if (msg.type === 'skin') {
+        setEggShellSkin(msg.skin);
+        saveStoredSkin(msg.skin);
+      } else if (msg.type === 'select_camera') {
         handleSelectCamera(msg.deviceId);
       } else if (msg.type === 'preview_request') {
         previewRequestedRef.current = msg.active;
@@ -791,9 +886,8 @@ export const App: React.FC = () => {
             demoMode: isDemoModeRef.current,
           },
         } satisfies PresenterMessage);
-
         // If this window is the primary telemetry producer, immediately sync the new window with current HP & camera
-        if (!isDashboardView) {
+        if (awardsCorn && !isDashboardView) {
           const currentScoring = scoringStateRef.current;
           const currentSig = currentSignalsRef.current;
           presenterChannel.postMessage({
@@ -861,6 +955,15 @@ export const App: React.FC = () => {
     electronAPI.onForceState((s) => forceState(s));
     electronAPI.onToggleDemoMode(() => toggleDemoMode());
     electronAPI.onOpenWizard?.(() => setShowWizard(true));
+    electronAPI.onToggleLock?.((locked) => {
+      setIsLocked(locked);
+      try {
+        localStorage.setItem('ergogotchi_pet_locked', String(locked));
+      } catch {}
+    });
+    electronAPI.onFeedDuck?.(() => {
+      handleFeed();
+    });
     electronAPI.onSetDifficulty?.((level) => handleSetDifficulty(level));
     const onDiffEvent = () => {
       try {
@@ -879,6 +982,12 @@ export const App: React.FC = () => {
       if (e.key === PET_STORAGE_KEY) setPet(loadPet());
       else if (e.key === JOURNAL_STORAGE_KEY) setJournal(loadJournal());
       else if (e.key === EVENTS_STORAGE_KEY) setEvents(loadEvents());
+      else if (e.key === THEME_STORAGE_KEY) setTheme(loadTheme());
+      else if (e.key === 'ergogotchi_pet_locked') {
+        setIsLocked(e.newValue !== 'false');
+      } else if (e.key === SKIN_STORAGE_KEY && e.newValue) {
+        setEggShellSkin(e.newValue as EggShellSkin);
+      }
     };
     window.addEventListener('storage', onStorage);
 
@@ -915,7 +1024,7 @@ export const App: React.FC = () => {
       if (electronAPI?.dockPet) {
         electronAPI.dockPet();
       } else if (electronAPI?.setPetBounds) {
-        electronAPI.setPetBounds({ width: 280, height: 320 });
+        electronAPI.setPetBounds({ width: 340, height: 480 });
       }
       electronAPI?.setIgnoreMouse?.(true);
     }
@@ -928,68 +1037,49 @@ export const App: React.FC = () => {
   };
 
   const activeState = forcedState || scoringState.state;
-
-  // Floating Update Notification Banner (when an update is found)
-  const updateBanner = updateInfo?.updateAvailable && !showUpdateModal && (
-    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border-2 border-cyan-400 rounded-2xl px-4 py-2.5 shadow-2xl backdrop-blur-md flex items-center gap-3 animate-bounce">
-      <span className="text-xl">⚡</span>
-      <div className="text-left text-xs leading-tight">
-        <span className="font-bold text-white">Update {updateInfo.latestVersion} Available!</span>
-        <p className="text-[10px] text-slate-300">Click to download update & restart ErgoGotchi.</p>
-      </div>
-      <button
-        type="button"
-        onClick={() => handleTriggerUpdate()}
-        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-400 hover:bg-cyan-300 text-slate-950 transition active:scale-95 shadow"
-      >
-        Update & Restart
-      </button>
-      <button
-        type="button"
-        onClick={() => setUpdateInfo((prev) => (prev ? { ...prev, updateAvailable: false } : null))}
-        className="text-slate-400 hover:text-slate-200 text-xs px-1"
-        title="Dismiss for now"
-      >
-        ✕
-      </button>
-    </div>
-  );
+  const activeHp = forcedState
+    ? (forcedState === 'THRIVING' ? 95 : forcedState === 'NEUTRAL' ? 75 : forcedState === 'SLOUCHING' ? 45 : 15)
+    : scoringState.hp;
 
   // Fullscreen / Floating Update Progress Modal (when downloading/installing)
   const updateModal = showUpdateModal && (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-center">
-        <div className="w-16 h-16 mx-auto rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-3xl animate-bounce">
+    <div
+      {...captureMouse}
+      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 select-none"
+      style={{ WebkitAppRegion: 'no-drag' } as any}
+    >
+      <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl p-4 sm:p-6 w-full max-w-[310px] sm:max-w-md shadow-2xl space-y-3 sm:space-y-4 text-center">
+        <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-2xl sm:text-3xl animate-pulse">
           📦
         </div>
         <div>
-          <h3 className="text-lg font-bold text-white">Updating ErgoGotchi</h3>
-          <p className="text-xs text-slate-300 mt-1">
+          <h3 className="text-base sm:text-lg font-bold text-white">Updating ErgoGotchi</h3>
+          <p className="text-[11px] sm:text-xs text-slate-300 mt-0.5">
             Downloading version {updateInfo?.latestVersion || 'latest'} from GitHub...
           </p>
         </div>
 
-        <div className="space-y-1.5 pt-2">
+        <div className="space-y-1.5 pt-1">
           <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
             <div
               className="bg-gradient-to-r from-cyan-400 to-emerald-400 h-full transition-all duration-150"
               style={{ width: `${updateProgress?.percent || 0}%` }}
             />
           </div>
-          <div className="flex justify-between items-center text-[11px] font-mono text-slate-400 px-1">
+          <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-mono text-slate-400 px-1">
             <span>
               {updateProgress && updateProgress.totalBytes > 0
-                ? `${(updateProgress.receivedBytes / (1024 * 1024)).toFixed(1)} MB / ${(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`
-                : 'Connecting to GitHub...'}
+                ? `${(updateProgress.receivedBytes / (1024 * 1024)).toFixed(1)} / ${(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`
+                : 'Connecting...'}
             </span>
             <span className="text-cyan-300 font-bold">{updateProgress?.percent || 0}%</span>
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-400 italic">
+        <p className="text-[10px] sm:text-[11px] text-slate-400 italic">
           {updateProgress && updateProgress.percent >= 100
             ? '✓ Download complete! Launching installer and restarting...'
-            : 'Please wait while the update downloads. ErgoGotchi will restart automatically.'}
+            : 'ErgoGotchi will restart automatically.'}
         </p>
       </div>
     </div>
@@ -1009,22 +1099,10 @@ export const App: React.FC = () => {
 
     return (
       <div className="w-screen h-screen bg-transparent flex flex-col items-center justify-end overflow-hidden select-none pb-1">
-        {isCalibrating && (
-          <div className="mb-2 px-3 py-2 rounded-xl bg-white border-2 border-black text-center shadow-[3px_3px_0_0_#000]">
-            <p className="text-[11px] font-black text-black">Sit tall… calibrating</p>
-            <div className="w-36 bg-neutral-200 border border-black rounded-full h-2 mt-1.5 overflow-hidden">
-              <div
-                className="bg-yellow-400 h-full transition-all duration-200"
-                style={{ width: `${calibrationProgress}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {updateBanner}
         {updateModal}
         <MascotSprite
           state={activeState}
-          hp={scoringState.hp}
+          hp={activeHp}
           isReviving={scoringState.isReviving}
           speechText={speechText}
           speechCue={speechCue}
@@ -1035,6 +1113,11 @@ export const App: React.FC = () => {
           onDismissSpeech={() => setSpeechText(null)}
           onOpenDashboard={handleOpenDashboard}
           onRecalibrate={handleRecalibrate}
+          isLocked={isLocked}
+          onToggleLock={handleToggleLock}
+          isCalibrating={isCalibrating}
+          calibrationProgress={calibrationProgress}
+          skin={eggShellSkin}
         />
       </div>
     );
@@ -1051,10 +1134,9 @@ export const App: React.FC = () => {
     return (
       <div data-theme={theme} className={`h-screen font-sans select-none overflow-hidden ${PAGE}`}>
         {wizardOverlay}
-        {updateBanner}
         {updateModal}
         <Dashboard
-          hp={scoringState.hp}
+          hp={activeHp}
           state={activeState}
           strainIndex={scoringState.strainIndex}
           blinkRate={currentSignals?.blink_rate_1m || 14}
@@ -1086,6 +1168,11 @@ export const App: React.FC = () => {
           onEventsChange={changeEvents}
           theme={theme}
           onToggleTheme={toggleTheme}
+          onSelectTheme={handleSelectTheme}
+          isLocked={isLocked}
+          onToggleLock={handleToggleLock}
+          skin={eggShellSkin}
+          onSelectSkin={handleSelectSkin}
           difficulty={difficulty}
           onSetDifficulty={handleSetDifficulty}
           isPresent={isPresent}
@@ -1116,6 +1203,10 @@ export const App: React.FC = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button onClick={toggleTheme} className={`${BUTTON_NEUTRAL} flex items-center gap-1.5`} title="Cycle theme">
+            <span>{THEMES.find((t) => t.id === theme)?.icon ?? '🌸'}</span>
+            <span>{THEMES.find((t) => t.id === theme)?.label ?? 'Theme'}</span>
+          </button>
           <button onClick={() => setShowWizard(true)} className={BUTTON_NEUTRAL}>
             Setup wizard 🪄
           </button>
@@ -1126,10 +1217,9 @@ export const App: React.FC = () => {
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center relative z-10 w-full p-4">
-        {updateBanner}
         {updateModal}
         {wizardOverlay}
-          <div className="relative w-full max-w-4xl h-96 rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
+          <div className="relative w-full max-w-4xl min-h-[500px] rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
             {/* Mock Code Editor in Background to demonstrate desktop companion feel */}
             <div className="font-mono text-xs text-slate-500 space-y-1 select-none pointer-events-none opacity-60">
               <p><span className="text-purple-400">import</span> &#123; ErgoGotchi &#125; <span className="text-purple-400">from</span> <span className="text-emerald-400">'@sunhacks/ergogotchi'</span>;</p>
@@ -1160,7 +1250,7 @@ export const App: React.FC = () => {
             <div className="flex justify-end items-end w-full">
               <MascotSprite
                 state={activeState}
-                hp={scoringState.hp}
+                hp={activeHp}
                 isReviving={scoringState.isReviving}
                 speechText={speechText}
                 speechCue={speechCue}
@@ -1171,6 +1261,11 @@ export const App: React.FC = () => {
                 onDismissSpeech={() => setSpeechText(null)}
                 onOpenDashboard={handleOpenDashboard}
                 onRecalibrate={handleRecalibrate}
+                isLocked={isLocked}
+                onToggleLock={handleToggleLock}
+                isCalibrating={isCalibrating}
+                calibrationProgress={calibrationProgress}
+                skin={eggShellSkin}
               />
             </div>
           </div>
