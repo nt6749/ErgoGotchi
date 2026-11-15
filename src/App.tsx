@@ -16,11 +16,11 @@ import {
   DEMO_PARAMS, 
   NORMAL_PARAMS, 
   step 
-} from './scoring/scoring';
-import { visionPipeline } from './vision/visionPipeline';
+} from './dev1_sensing_and_scoring/scoring';
+import { visionPipeline } from './dev1_sensing_and_scoring/visionPipeline';
 import { wsClient } from './net/websocketClient';
-import { MascotSprite } from './pet/MascotSprite';
-import type { PetEmote } from './pet/PixelMascot';
+import { MascotSprite } from './dev2_mascot_and_ui/MascotSprite';
+import type { PetEmote } from './dev2_mascot_and_ui/PixelMascot';
 
 /** Posture warnings clear after this many consecutive seconds of good posture. */
 const CLEAR_WARNING_AFTER_GOOD_SECONDS = 2;
@@ -30,7 +30,7 @@ const POSTURE_CUES: StretchCue[] = ['CHIN_TUCK', 'SHOULDER_ROLL', 'SIT_BACK'];
 
 /** How long the "don't duck with me" knife warning stays up (matches the speech bubble). */
 const KNIFE_EMOTE_MS = 8000;
-import { Dashboard } from './dashboard/Dashboard';
+import { Dashboard } from './dev2_mascot_and_ui/Dashboard';
 
 interface ElectronAPI {
   isElectron: boolean;
