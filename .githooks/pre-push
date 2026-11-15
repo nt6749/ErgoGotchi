@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# ErgoGotchi Local Pre-Push Safety Hook
+# 1. Blocks direct pushes to 'main'
+# 2. Runs quick unit tests before allowing push to remote
+
+while read local_ref local_sha remote_ref remote_sha
+do
+    if [ "$remote_ref" = "refs/heads/main" ]; then
+        echo "=========================================================="
+        echo "🛑 PUSH TO 'main' BLOCKED BY ERGOGOTCHI REPO POLICY!"
+        echo "=========================================================="
+        echo "Direct pushes to 'main' are prohibited to prevent broken merges."
+        echo "Please push to your feature branch and open a Pull Request:"
+        echo ""
+        echo "   git checkout -b feat/your-feature-name"
+        echo "   git push -u origin feat/your-feature-name"
+        echo ""
+        exit 1
+    fi
+done
+
+echo "🔍 Running pre-push unit test verification..."
+if ! npm test -- --run; then
+    echo "❌ Frontend unit tests failed! Fix tests before pushing."
+    exit 1
+fi
+
+echo "✓ Pre-push checks passed."
+exit 0

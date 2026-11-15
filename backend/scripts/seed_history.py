@@ -16,9 +16,9 @@ from app.config import settings
 async def seed_data():
     print("Connecting to database...")
     await db.connect()
-    
-    session_id = str(uuid.uuid4())
-    print(f"Generating realistic ergonomic session history for Session ID: {session_id}")
+    try:
+        session_id = str(uuid.uuid4())
+        print(f"Generating realistic ergonomic session history for Session ID: {session_id}")
     
     records = []
     now = datetime.now(timezone.utc)
@@ -102,6 +102,8 @@ async def seed_data():
             print(f"Note on refresh aggregate: {e}")
 
     print(f"\n[DONE] To view seeded dashboard series in API:\nGET http://localhost:8000/sessions/{session_id}/series?minutes=120\n")
+    finally:
+        await db.close()
 
 if __name__ == "__main__":
     asyncio.run(seed_data())

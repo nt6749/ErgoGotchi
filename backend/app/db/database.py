@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -93,7 +94,8 @@ class DatabaseManager:
     async def _init_postgres(self, conn: asyncpg.Connection):
         """Execute PostgreSQL / TimescaleDB schema."""
         try:
-            with open("app/db/schema.sql", "r") as f:
+            schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+            with open(schema_path, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
             await conn.execute(schema_sql)
             logger.info("TimescaleDB / Tiger Data schema verified successfully.")
@@ -168,6 +170,9 @@ class DatabaseManager:
                 logger.error("Error batch inserting to PostgreSQL: %s. Falling back to SQLite insertion.", e)
 
         # SQLite insertion fallback
+        if not self.sqlite_conn:
+            self._init_sqlite()
+
         if self.sqlite_conn:
             async with self._lock:
                 loop = asyncio.get_event_loop()
@@ -182,7 +187,7 @@ class DatabaseManager:
             elif not ts:
                 ts = datetime.now(timezone.utc).isoformat()
 
-            sid = str(r.get("session_id", "default-session"))
+            sid = str(to_session_uuid(r.get("session_id")))
             rows.append((
                 ts,
                 sid,
@@ -198,13 +203,16 @@ class DatabaseManager:
                 r.get("state")
             ))
 
-        with self.sqlite_conn:
-            self.sqlite_conn.executemany("""
-                INSERT OR REPLACE INTO ergo_telemetry 
-                (recorded_at, session_id, present, forward_head, head_drop, lean_in, 
-                 head_pitch_deg, shoulder_tilt_deg, blink_rate_1m, strain_index, hp, state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, rows)
+        try:
+            with self.sqlite_conn:
+                self.sqlite_conn.executemany("""
+                    INSERT OR REPLACE INTO ergo_telemetry 
+                    (recorded_at, session_id, present, forward_head, head_drop, lean_in, 
+                     head_pitch_deg, shoulder_tilt_deg, blink_rate_1m, strain_index, hp, state)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, rows)
+        except Exception as e:
+            logger.error("SQLite batch insert failed: %s", e)
 
     async def get_series(self, session_id: str, minutes: int = 30) -> List[Dict[str, Any]]:
         """Retrieve 1-minute bucketed continuous aggregate series with strain velocity."""
@@ -244,6 +252,9 @@ class DatabaseManager:
                 logger.warning("TimescaleDB query failed (%s); querying raw SQLite fallback.", e)
 
         # Fallback SQLite 1-minute aggregation
+        if not self.sqlite_conn:
+            self._init_sqlite()
+
         if self.sqlite_conn:
             async with self._lock:
                 loop = asyncio.get_event_loop()
@@ -252,6 +263,7 @@ class DatabaseManager:
         return []
 
     def _query_sqlite_series(self, session_id: str, minutes: int) -> List[Dict[str, Any]]:
+        sid = str(to_session_uuid(session_id))
         query = """
         SELECT 
             strftime('%Y-%m-%dT%H:%M:00Z', recorded_at) AS bucket,
@@ -262,12 +274,12 @@ class DatabaseManager:
             AVG(blink_rate_1m) AS avg_blink_rate,
             MIN(hp) AS min_hp
         FROM ergo_telemetry
-        WHERE session_id = ? AND present = 1
+        WHERE session_id = ? AND present = 1 AND datetime(recorded_at) >= datetime('now', '-' || ? || ' minutes')
         GROUP BY bucket
         ORDER BY bucket ASC;
         """
         cursor = self.sqlite_conn.cursor()
-        cursor.execute(query, (str(session_id),))
+        cursor.execute(query, (sid, int(minutes)))
         rows = cursor.fetchall()
         
         results = []
@@ -310,6 +322,9 @@ class DatabaseManager:
                 logger.error("Failed to query TimescaleDB stats: %s", e)
 
         # SQLite fallback stats
+        if not self.sqlite_conn:
+            self._init_sqlite()
+
         if self.sqlite_conn:
             cursor = self.sqlite_conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM ergo_telemetry;")
@@ -324,5 +339,23 @@ class DatabaseManager:
             }
 
         return {"storage_engine": "None", "status": "DISCONNECTED"}
+
+    async def close(self):
+        """Cleanly close database connection pools and SQLite handle."""
+        if self.pool:
+            try:
+                await self.pool.close()
+                logger.info("Closed TimescaleDB/PostgreSQL connection pool.")
+            except Exception as e:
+                logger.warning("Error closing PostgreSQL pool: %s", e)
+            self.pool = None
+
+        if self.sqlite_conn:
+            try:
+                self.sqlite_conn.close()
+                logger.info("Closed SQLite connection.")
+            except Exception as e:
+                logger.warning("Error closing SQLite connection: %s", e)
+            self.sqlite_conn = None
 
 db = DatabaseManager()
