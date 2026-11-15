@@ -35,6 +35,9 @@ const ACTIVITY_CHOICES = [
 ];
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const APP_ICON_PATH = process.platform === 'win32'
+  ? path.join(__dirname, '../build/icon.ico')
+  : path.join(__dirname, '../build/icon.png');
 
 function checkBackendAlive() {
   return new Promise((resolve) => {
@@ -107,6 +110,7 @@ function createPetWindow() {
   const initialY = screenHeight - initialHeight - 10;
 
   petWindow = new BrowserWindow({
+    icon: APP_ICON_PATH,
     width: initialWidth,
     height: initialHeight,
     x: initialX,
@@ -267,6 +271,7 @@ function createDashboardWindow() {
   }
 
   dashboardWindow = new BrowserWindow({
+    icon: APP_ICON_PATH,
     width: 1024,
     height: 720,
     title: 'ErgoGotchi Companion Dashboard - sunhacks 2026',
