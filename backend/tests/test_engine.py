@@ -120,3 +120,22 @@ def test_sqlite_time_filtering():
 
     rows_120m = conn.execute(query, (sid, 120)).fetchall()
     assert len(rows_120m) == 2
+
+def test_safe_json_loads_markdown():
+    """Verify JSON parser handles markdown code blocks and whitespace."""
+    from app.gemini.engine import _safe_json_loads
+    raw_markdown = '```json\n{"lines": ["test 1", "test 2"]}\n```'
+    parsed = _safe_json_loads(raw_markdown)
+    assert parsed["lines"] == ["test 1", "test 2"]
+
+    plain = '{"text": "Sit back and stretch."}'
+    assert _safe_json_loads(plain)["text"] == "Sit back and stretch."
+
+def test_database_close_lifecycle():
+    """Verify db.close() executes cleanly without exceptions."""
+    import asyncio
+    from app.db.database import db
+    asyncio.run(db.connect())
+    asyncio.run(db.close())
+    assert db.pool is None
+    assert db.sqlite_conn is None

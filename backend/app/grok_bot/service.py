@@ -22,11 +22,12 @@ class GrokBotService:
             logger.info("No webhook URL configured for Grok Bot. Skipping external dispatch.")
             return False
 
+        sid_short = str(session_id or "session")[:8]
         payload = {
             "content": "🚀 **ErgoGotchi Posture & Ergonomics Debrief**",
             "embeds": [
                 {
-                    "title": f"Session Debrief: {session_id[:8]}",
+                    "title": f"Session Debrief: {sid_short}",
                     "description": summary_text,
                     "color": 3066993 if stats.get("min_hp", 100) >= 50 else 15158332,
                     "fields": [

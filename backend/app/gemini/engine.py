@@ -10,6 +10,18 @@ from app.config import settings
 
 logger = logging.getLogger("ergogotchi.gemini")
 
+def _safe_json_loads(raw_text: str) -> Dict[str, Any]:
+    """Parse JSON safely even if the LLM wraps response in markdown code blocks."""
+    text = (raw_text or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return json.loads(text)
+
 # Fixed Biomechanical Stretch Cues & Instructions (never hallucinated by LLM)
 STRETCH_INSTRUCTIONS: Dict[str, str] = {
     "CHIN_TUCK": "Pull your head straight back, hold 5 seconds, 3 times.",
@@ -120,13 +132,16 @@ Rules:
                     response_format={"type": "text", "mime_type": "application/json"}
                 )
             )
-            data = json.loads(response.output_text)
+            data = _safe_json_loads(response.output_text)
             lines = data.get("lines", [])
+            cue_cache = self.cache.setdefault(cue, [])
             for line in lines:
                 clean_line = line.strip().replace('"', '')
                 if clean_line and len(clean_line) <= 90:
-                    self.cache.setdefault(cue, []).append(clean_line)
-            logger.info("Successfully cached %d fresh lines for cue %s", len(lines), cue)
+                    if len(cue_cache) >= 50:
+                        cue_cache.pop(0)
+                    cue_cache.append(clean_line)
+            logger.info("Successfully cached %d fresh lines for cue %s (total: %d)", len(lines), cue, len(cue_cache))
         except Exception as e:
             logger.warning("Background Gemini warm-up failed for cue %s: %s", cue, e)
 
@@ -219,12 +234,16 @@ Return JSON: {{"text": "..."}}
                     response_format={"type": "text", "mime_type": "application/json"}
                 )
             )
-            data = json.loads(response.output_text)
+            data = _safe_json_loads(response.output_text)
             new_text = data.get("text", "").strip()
             if new_text and len(new_text) <= 90:
-                self.cache.setdefault(cue, []).append(new_text)
+                cue_cache = self.cache.setdefault(cue, [])
+                if len(cue_cache) >= 50:
+                    cue_cache.pop(0)
+                cue_cache.append(new_text)
+                logger.info("Cached fresh background line for %s: '%s'", cue, new_text)
         except Exception as e:
-            logger.debug("Background context generation error: %s", e)
+            logger.warning("Background context line generation failed for cue '%s': %s", cue, e)
 
     async def generate_session_summary(self, session_stats: Dict[str, Any]) -> str:
         """Generate a 3-sentence end-of-session ergonomic summary."""

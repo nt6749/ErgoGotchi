@@ -170,6 +170,9 @@ class DatabaseManager:
                 logger.error("Error batch inserting to PostgreSQL: %s. Falling back to SQLite insertion.", e)
 
         # SQLite insertion fallback
+        if not self.sqlite_conn:
+            self._init_sqlite()
+
         if self.sqlite_conn:
             async with self._lock:
                 loop = asyncio.get_event_loop()
@@ -200,13 +203,16 @@ class DatabaseManager:
                 r.get("state")
             ))
 
-        with self.sqlite_conn:
-            self.sqlite_conn.executemany("""
-                INSERT OR REPLACE INTO ergo_telemetry 
-                (recorded_at, session_id, present, forward_head, head_drop, lean_in, 
-                 head_pitch_deg, shoulder_tilt_deg, blink_rate_1m, strain_index, hp, state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, rows)
+        try:
+            with self.sqlite_conn:
+                self.sqlite_conn.executemany("""
+                    INSERT OR REPLACE INTO ergo_telemetry 
+                    (recorded_at, session_id, present, forward_head, head_drop, lean_in, 
+                     head_pitch_deg, shoulder_tilt_deg, blink_rate_1m, strain_index, hp, state)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, rows)
+        except Exception as e:
+            logger.error("SQLite batch insert failed: %s", e)
 
     async def get_series(self, session_id: str, minutes: int = 30) -> List[Dict[str, Any]]:
         """Retrieve 1-minute bucketed continuous aggregate series with strain velocity."""
@@ -246,6 +252,9 @@ class DatabaseManager:
                 logger.warning("TimescaleDB query failed (%s); querying raw SQLite fallback.", e)
 
         # Fallback SQLite 1-minute aggregation
+        if not self.sqlite_conn:
+            self._init_sqlite()
+
         if self.sqlite_conn:
             async with self._lock:
                 loop = asyncio.get_event_loop()
@@ -313,6 +322,9 @@ class DatabaseManager:
                 logger.error("Failed to query TimescaleDB stats: %s", e)
 
         # SQLite fallback stats
+        if not self.sqlite_conn:
+            self._init_sqlite()
+
         if self.sqlite_conn:
             cursor = self.sqlite_conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM ergo_telemetry;")
@@ -327,5 +339,23 @@ class DatabaseManager:
             }
 
         return {"storage_engine": "None", "status": "DISCONNECTED"}
+
+    async def close(self):
+        """Cleanly close database connection pools and SQLite handle."""
+        if self.pool:
+            try:
+                await self.pool.close()
+                logger.info("Closed TimescaleDB/PostgreSQL connection pool.")
+            except Exception as e:
+                logger.warning("Error closing PostgreSQL pool: %s", e)
+            self.pool = None
+
+        if self.sqlite_conn:
+            try:
+                self.sqlite_conn.close()
+                logger.info("Closed SQLite connection.")
+            except Exception as e:
+                logger.warning("Error closing SQLite connection: %s", e)
+            self.sqlite_conn = None
 
 db = DatabaseManager()
