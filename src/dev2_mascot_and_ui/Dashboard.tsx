@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { DifficultyLevel, PetState, UpdateInfo, UpdateProgress } from '../types';
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
 import { MyDuck } from './MyDuck';
+import { DEFAULT_SKIN, type EggShellSkin } from './eggShellSkins';
 import { CameraScreen } from './CameraScreen';
 import type { ForcedActivity } from './PixelMascot';
 import {
@@ -95,6 +96,14 @@ interface DashboardProps {
   theme?: ThemeMode;
   onToggleTheme?: () => void;
 
+  // Position lock mode
+  isLocked?: boolean;
+  onToggleLock?: (locked: boolean) => void;
+
+  // Egg Shell Skin
+  skin?: EggShellSkin;
+  onSelectSkin?: (skin: EggShellSkin) => void;
+
   // Difficulty setting
   difficulty?: DifficultyLevel;
   onSetDifficulty?: (level: DifficultyLevel) => void;
@@ -179,6 +188,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onEventsChange = () => {},
   theme = 'dark',
   onToggleTheme,
+  isLocked = true,
+  onToggleLock,
+  skin = DEFAULT_SKIN,
+  onSelectSkin,
   difficulty,
   onSetDifficulty,
   isPresent = true,
@@ -551,7 +564,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* My DuckDuck: profile + wardrobe */}
           {activeTab === 'myduck' && (
-            <MyDuck pet={pet} onPetChange={onPetChange} onFeed={onFeed} cornEverySeconds={cornInterval(isDemoMode)} />
+            <MyDuck
+              pet={pet}
+              onPetChange={onPetChange}
+              onFeed={onFeed}
+              cornEverySeconds={cornInterval(isDemoMode)}
+              isLocked={isLocked}
+              onToggleLock={onToggleLock}
+              skin={skin}
+              onSelectSkin={onSelectSkin}
+            />
           )}
 
           {/* Quests: daily quests, games, achievements, session report, stretches */}
