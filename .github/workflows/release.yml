@@ -42,7 +42,6 @@ jobs:
           name: ErgoGotchi-Windows-Installers
           path: |
             release/*.exe
-            release/*.blockmap
           if-no-files-found: ignore
 
   build-macos:
@@ -75,7 +74,6 @@ jobs:
           name: ErgoGotchi-macOS-Installers
           path: |
             release/*.dmg
-            release/*.blockmap
           if-no-files-found: ignore
 
   create-release:
@@ -104,7 +102,6 @@ jobs:
           files: |
             dist-release/*.exe
             dist-release/*.dmg
-            dist-release/*.blockmap
           generate_release_notes: true
           draft: false
           prerelease: false
