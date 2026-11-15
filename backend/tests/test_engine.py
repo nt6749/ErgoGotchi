@@ -21,9 +21,9 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.config import settings
-from app.db.database import db, to_session_uuid
+from app.db.database import db, to_session_uuid, _clean_float, _clean_state
 from app.gemini.engine import gemini_engine, STRETCH_INSTRUCTIONS, CANNED_LINES, _safe_json_loads
-from app.grok_bot.service import grok_bot
+from app.grok_bot.service import grok_bot, is_safe_webhook_url
 from app.main import app, telemetry_buffer, buffer_lock
 
 logger = logging.getLogger("ergogotchi.tests")
@@ -658,3 +658,76 @@ def test_grok_bot_service_safeties(monkeypatch):
 
     asyncio.run(_run())
     logger.info("-> Grok Bot service safeties, ASCII headers, and 6-field diagnostic embed verified.")
+
+
+def test_security_hardening_audit(monkeypatch):
+    """Verify SSRF defense, NaN aggregate poison prevention, 4KB WS frame guard, and webhook cooldown."""
+    logger.info("Executing test_security_hardening_audit...")
+
+    # 1. SSRF Defense: is_safe_webhook_url
+    assert is_safe_webhook_url("https://discord.com/api/webhooks/123/xyz") is True
+    assert is_safe_webhook_url("https://canary.discord.com/api/webhooks/123/xyz") is True
+    assert is_safe_webhook_url("https://hooks.slack.com/services/T00/B00/X00") is True
+    assert is_safe_webhook_url("https://chat.googleapis.com/v1/spaces/FOO/messages") is True
+    assert is_safe_webhook_url("https://ntfy.sh/bobi_posture_channel") is True
+
+    # Suffix match spoofing attack (must fail)
+    assert is_safe_webhook_url("https://attacker-discord.com/api/webhooks") is False
+    assert is_safe_webhook_url("https://evil-ntfy.sh/hacked") is False
+
+    # Plain HTTP (must fail)
+    assert is_safe_webhook_url("http://discord.com/api/webhooks/123/xyz") is False
+
+    # Private IP literals & loopback / link-local addresses (must fail)
+    assert is_safe_webhook_url("https://127.0.0.1:8080/hook") is False
+    assert is_safe_webhook_url("https://169.254.169.254/latest/meta-data") is False
+    assert is_safe_webhook_url("https://10.0.0.1/admin") is False
+    assert is_safe_webhook_url("https://192.168.1.1/secret") is False
+    assert is_safe_webhook_url("invalid-url-string") is False
+
+    # 2. NaN / Infinity aggregate poison prevention (_clean_float)
+    import math
+    assert _clean_float(float("nan")) is None
+    assert _clean_float(float("inf")) is None
+    assert _clean_float(float("-inf")) is None
+    assert _clean_float(None) is None
+    assert _clean_float(0.45) == 0.45
+    assert _clean_float(0.0) == 0.0
+
+    # 3. State enum injection prevention (_clean_state)
+    assert _clean_state("THRIVING") == "THRIVING"
+    assert _clean_state("SLOUCHING") == "SLOUCHING"
+    assert _clean_state("WILTED") == "WILTED"
+    assert _clean_state("NEUTRAL") == "NEUTRAL"
+    assert _clean_state("DROP TABLE ergo_raw;") == "NEUTRAL"
+    assert _clean_state("UNKNOWN_STATE") == "NEUTRAL"
+    assert _clean_state(None) == "NEUTRAL"
+
+    # 4. WebSocket 4KB frame size drop & resilience
+    client = TestClient(app)
+    with client.websocket_connect("/ws?token=dev") as ws:
+        # Send an oversized frame > 4096 bytes
+        huge_payload = json.dumps({"type": "telemetry", "payload": "A" * 5000})
+        ws.send_text(huge_payload)
+        # Connection must survive and handle subsequent valid frames
+        ws.send_text(json.dumps({"type": "ping"}))
+        pong = json.loads(ws.receive_text())
+        assert pong["type"] == "pong"
+
+    # 5. Webhook Cooldown / Rate Limiting (10s flood guard)
+    async def mock_send(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(grok_bot, "send_session_digest", mock_send)
+
+    # First request succeeds
+    resp1 = client.post("/grok-bot/webhook?session_id=flood-test&webhook_url=https://discord.com/api/webhooks/1/2")
+    assert resp1.status_code == 200
+
+    # Immediate second request triggers HTTP 429 Too Many Requests
+    resp2 = client.post("/grok-bot/webhook?session_id=flood-test&webhook_url=https://discord.com/api/webhooks/1/2")
+    assert resp2.status_code == 429
+    assert "Rate limit exceeded" in resp2.json()["detail"]
+
+    logger.info("-> Passed security hardening audit test suite.")
+

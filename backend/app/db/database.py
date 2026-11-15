@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 import os
 import sqlite3
 import uuid
@@ -19,6 +20,23 @@ from app.config import settings
 logger = logging.getLogger("ergogotchi.db")
 
 _SESSION_NAMESPACE = uuid.UUID("6f1c2a52-3d1e-4b8e-9a51-e0a0f0c0ffee")
+
+VALID_STATES = frozenset({"CALIBRATING", "THRIVING", "NEUTRAL", "SLOUCHING", "WILTED", "AWAY"})
+
+
+def _clean_float(val: Any) -> Optional[float]:
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return f if math.isfinite(f) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _clean_state(val: Any) -> str:
+    s = str(val or "NEUTRAL").upper().strip()
+    return s if s in VALID_STATES else "NEUTRAL"
 
 
 def to_session_uuid(session_id) -> uuid.UUID:
@@ -158,15 +176,15 @@ class DatabaseManager:
                         ts,
                         sid,
                         bool(r.get("present", True)),
-                        r.get("forward_head"),
-                        r.get("head_drop"),
-                        r.get("lean_in"),
-                        r.get("head_pitch_deg"),
-                        r.get("shoulder_tilt_deg"),
+                        _clean_float(r.get("forward_head")),
+                        _clean_float(r.get("head_drop")),
+                        _clean_float(r.get("lean_in")),
+                        _clean_float(r.get("head_pitch_deg")),
+                        _clean_float(r.get("shoulder_tilt_deg")),
                         int(round(float(raw_blink))) if raw_blink is not None else None,
-                        r.get("strain_index"),
+                        _clean_float(r.get("strain_index")),
                         int(round(float(raw_hp))) if raw_hp is not None else 100,
-                        r.get("state")
+                        _clean_state(r.get("state"))
                     )
                 tuples = list(deduped.values())
 
@@ -209,15 +227,15 @@ class DatabaseManager:
                 ts,
                 sid,
                 1 if r.get("present", True) else 0,
-                r.get("forward_head"),
-                r.get("head_drop"),
-                r.get("lean_in"),
-                r.get("head_pitch_deg"),
-                r.get("shoulder_tilt_deg"),
+                _clean_float(r.get("forward_head")),
+                _clean_float(r.get("head_drop")),
+                _clean_float(r.get("lean_in")),
+                _clean_float(r.get("head_pitch_deg")),
+                _clean_float(r.get("shoulder_tilt_deg")),
                 int(round(float(raw_blink))) if raw_blink is not None else None,
-                r.get("strain_index"),
+                _clean_float(r.get("strain_index")),
                 int(round(float(raw_hp))) if raw_hp is not None else 100,
-                r.get("state")
+                _clean_state(r.get("state"))
             ))
 
         try:

@@ -1,13 +1,52 @@
 """SpaceXSI Grok Bot — Autonomous Desk-Setup Diagnostician & Achievement Dispatcher."""
 
 import asyncio
+import ipaddress
 import logging
 from typing import Dict, Any, Optional
+from urllib.parse import urlparse
 import httpx
 
 from app.config import settings
 
 logger = logging.getLogger("ergogotchi.grok")
+
+ALLOWED_WEBHOOK_DOMAINS = (
+    "discord.com",
+    "discordapp.com",
+    "slack.com",
+    "chat.googleapis.com",
+    "ntfy.sh",
+    "webhook.site",
+    "httpbin.org",
+)
+
+
+def is_safe_webhook_url(url: str) -> bool:
+    """Validate webhook URL against SSRF (HTTPS only, trusted domains, no private/loopback IPs)."""
+    try:
+        parsed = urlparse(url.strip())
+        if parsed.scheme != "https":
+            return False
+        hostname = (parsed.hostname or "").lower().strip(".")
+        if not hostname:
+            return False
+
+        # Reject raw IP addresses (blocks 127.0.0.1, 169.254.169.254, RFC 1918)
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return False
+        except ValueError:
+            pass
+
+        # Strict domain boundary match (prevents "evil-discord.com" bypass)
+        return any(
+            hostname == domain or hostname.endswith("." + domain)
+            for domain in ALLOWED_WEBHOOK_DOMAINS
+        )
+    except Exception:
+        return False
 
 # Deterministic, zero-cost physical desk diagnoses & Next-Session Quests (never hallucinated by LLM)
 DESK_DIAGNOSES: Dict[str, Dict[str, str]] = {
@@ -159,6 +198,9 @@ class GrokBotService:
         url = str(webhook_url if webhook_url is not None else settings.GROK_WEBHOOK_URL or "").strip()
         if not url:
             logger.info("No webhook URL configured for Grok Bot. Skipping external dispatch.")
+            return False
+        if not is_safe_webhook_url(url):
+            logger.warning("Blocked unsafe or untrusted webhook URL: %s", url)
             return False
 
         safe_stats = stats if isinstance(stats, dict) else {}

@@ -1,6 +1,7 @@
 """ErgoGotchi FastAPI Server: Telemetry Ingestion, Tiger Data Aggregation & Gemini Coaching."""
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -18,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.db.database import db
+from app.db.database import db, _clean_state
 from app.gemini.engine import gemini_engine
 from app.grok_bot.service import grok_bot
 
@@ -179,15 +180,30 @@ async def get_session_summary(session_id: str):
     summary_cache[session_id] = (now, fingerprint, result)
     return result
 
+# 10-Second Per-Session Cooldown on POST /grok-bot/webhook
+webhook_cooldowns: Dict[str, float] = {}
+
 @app.post("/grok-bot/webhook")
-async def dispatch_grok_bot(session_id: str):
-    """Trigger SpaceXSI Grok Bot daily/session digest dispatch."""
+async def dispatch_grok_bot(session_id: str, webhook_url: Optional[str] = None):
+    """Trigger SpaceXSI Grok Bot daily/session digest dispatch with 10s flood guard."""
+    now = asyncio.get_running_loop().time()
+    last_sent = webhook_cooldowns.get(session_id, 0.0)
+    if (now - last_sent) < 10.0:
+        remaining = round(10.0 - (now - last_sent), 1)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded: Cooldown active ({remaining}s remaining)",
+        )
+
     summary_resp = await get_session_summary(session_id)
     sent = await grok_bot.send_session_digest(
         session_id=session_id,
         summary_text=summary_resp["summary"],
-        stats=summary_resp["stats"]
+        stats=summary_resp["stats"],
+        webhook_url=webhook_url or settings.GROK_BOT_WEBHOOK_URL,
     )
+    if sent:
+        webhook_cooldowns[session_id] = now
     return {"dispatched": sent, "session_id": session_id}
 
 @app.websocket("/ws")
@@ -198,9 +214,11 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
     - Ingests Contract 2 (Intervention Request)
     - Emits Contract 3 (Intervention with Gemini Persona Joke & Biomechanical Cue)
     """
-    # Shared secret verification
-    if token != settings.SHARED_TOKEN and token != "dev":
-        logger.warning("WebSocket rejected: invalid token '%s'", token)
+    # Constant-time token verification + dev toggle
+    valid_secret = bool(settings.SHARED_TOKEN) and hmac.compare_digest(token, settings.SHARED_TOKEN)
+    valid_dev = settings.ALLOW_DEV_TOKEN and hmac.compare_digest(token, "dev")
+    if not (valid_secret or valid_dev):
+        logger.warning("WebSocket rejected: unauthorized token '%s'", token)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -210,6 +228,10 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
     try:
         while True:
             text_data = await websocket.receive_text()
+            if len(text_data) > 4096:
+                logger.warning("Dropped oversized WebSocket frame (%d bytes)", len(text_data))
+                continue
+
             try:
                 msg = json.loads(text_data)
             except json.JSONDecodeError as jde:
@@ -232,7 +254,7 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
                     "blink_rate_1m": msg.get("blink_rate_1m"),
                     "strain_index": msg.get("strain_index"),
                     "hp": msg.get("hp"),
-                    "state": msg.get("state")
+                    "state": _clean_state(msg.get("state"))
                 }
                 async with buffer_lock:
                     telemetry_buffer.append(record)

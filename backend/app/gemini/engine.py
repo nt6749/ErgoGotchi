@@ -20,6 +20,20 @@ def _safe_json_loads(raw_text: str) -> Dict[str, Any]:
         text = match.group(1).strip()
     return json.loads(text)
 
+VALID_SIGNALS = frozenset({
+    "forward_head",
+    "head_drop",
+    "head_pitch",
+    "head_pitch_deg",
+    "lean_in",
+    "tilt",
+    "shoulder_tilt",
+    "shoulder_tilt_deg",
+    "blink",
+    "blink_rate",
+    "blink_rate_1m",
+})
+
 # Fixed Biomechanical Stretch Cues & Instructions (never hallucinated by LLM)
 STRETCH_INSTRUCTIONS: Dict[str, str] = {
     "CHIN_TUCK": "Pull your head straight back, hold 5 seconds, 3 times.",
@@ -180,9 +194,9 @@ Rules:
         worst_signal = str(ctx.get("worst_signal") or "forward_head")
         if worst_signal == "forward_head":
             return "CHIN_TUCK"
-        elif worst_signal in ("head_drop", "head_pitch"):
+        elif worst_signal in ("head_drop", "head_pitch", "head_pitch_deg"):
             return "SHOULDER_ROLL"
-        elif worst_signal in ("lean_in", "tilt"):
+        elif worst_signal in ("lean_in", "tilt", "shoulder_tilt", "shoulder_tilt_deg"):
             return "SIT_BACK"
 
         return "CHIN_TUCK"
@@ -248,16 +262,37 @@ Rules:
         }
 
     async def _generate_contextual_line(self, cue: str, reason: str, context: Dict[str, Any]):
-        """Generate a single context-aware line in background and add to cache."""
+        """Generate a single context-aware line in background with strict prompt-injection sanitization."""
         try:
+            ctx = context if isinstance(context, dict) else {}
+            raw_sig = str(ctx.get("worst_signal") or "forward_head")
+            safe_sig = raw_sig if raw_sig in VALID_SIGNALS else "forward_head"
+
+            try:
+                safe_hp = max(0, min(100, int(round(float(ctx.get("hp", 50))))))
+            except (ValueError, TypeError):
+                safe_hp = 50
+            try:
+                safe_strain = max(0.0, min(1.0, round(float(ctx.get("strain_index", 0.5)), 2)))
+            except (ValueError, TypeError):
+                safe_strain = 0.5
+            try:
+                safe_mins = max(0, min(1440, int(round(float(ctx.get("minutes_in_session", 30))))))
+            except (ValueError, TypeError):
+                safe_mins = 30
+            try:
+                safe_blinks = max(0, min(120, int(round(float(ctx.get("blink_rate_1m", 10))))))
+            except (ValueError, TypeError):
+                safe_blinks = 10
+
             prompt = f"""
 You are ErgoGotchi, a cute desk companion whose life depends on user posture.
 Current situation:
-- User HP: {context.get('hp')} / 100
-- Strain Index: {context.get('strain_index', 0.5)}
-- Worst Signal: {context.get('worst_signal')}
-- Session Time: {context.get('minutes_in_session', 30)} minutes
-- Blink Rate: {context.get('blink_rate_1m', 10)} blinks/min
+- User HP: {safe_hp} / 100
+- Strain Index: {safe_strain}
+- Worst Signal: {safe_sig}
+- Session Time: {safe_mins} minutes
+- Blink Rate: {safe_blinks} blinks/min
 - Prescribed Cue: {cue}
 
 Write ONE short, witty, affectionate comic line (max 85 characters, 1 sentence, no emojis, no medical claims).
@@ -296,12 +331,29 @@ Return JSON: {{"text": "..."}}
                 "Keep taking regular micro-breaks to ensure your ErgoGotchi stays thriving!"
             )
 
+        try:
+            safe_strain = max(0.0, min(1.0, round(float(stats.get("avg_strain", 0.3) or 0.3), 3)))
+        except (ValueError, TypeError):
+            safe_strain = 0.3
+        try:
+            safe_min_hp = max(0, min(100, int(round(float(stats.get("min_hp", 75) or 75)))))
+        except (ValueError, TypeError):
+            safe_min_hp = 75
+        try:
+            safe_minutes = max(0, min(1440, int(round(float(stats.get("minutes", 45) or 45)))))
+        except (ValueError, TypeError):
+            safe_minutes = 45
+        try:
+            safe_blink = max(0.0, min(120.0, round(float(stats.get("avg_blink_rate", 12.0) or 12.0), 1)))
+        except (ValueError, TypeError):
+            safe_blink = 12.0
+
         prompt = f"""
 Write an encouraging 3-sentence summary of the user's coding work session based on these telemetry metrics:
-- Average Strain Index: {stats.get('avg_strain', 0.3)} (0 is perfect, 1 is terrible)
-- Minimum Mascot HP: {stats.get('min_hp', 75)}
-- Total Active Minutes: {stats.get('minutes', 45)}
-- Average Blinks per minute: {stats.get('avg_blink_rate', 12)}
+- Average Strain Index: {safe_strain} (0 is perfect, 1 is terrible)
+- Minimum Mascot HP: {safe_min_hp}
+- Total Active Minutes: {safe_minutes}
+- Average Blinks per minute: {safe_blink}
 
 Tone: Warm, motivating, ergonomic coach. Max 3 sentences. No bullet points.
 """
