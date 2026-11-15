@@ -18,7 +18,25 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   ]);
 }
 
+/** localStorage key for the user's chosen camera (shared by the pet and dashboard windows). */
+export const CAMERA_PREF_KEY = 'ergogotchi.cameraId';
+
+export interface CameraOption {
+  deviceId: string;
+  label: string;
+}
+
+function readCameraPreference(): string | null {
+  try {
+    return localStorage.getItem(CAMERA_PREF_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export class VisionPipeline {
+  /** deviceId of the camera currently in use; null when on fallback signals. */
+  public activeCameraId: string | null = null;
   private videoElement: HTMLVideoElement | null = null;
   private isRunning: boolean = false;
   private intervalId: any = null;
@@ -133,11 +151,38 @@ export class VisionPipeline {
 
     try {
       const video = this.videoElement;
-      const open = navigator.mediaDevices
-        .getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false })
+      const size = { width: 640, height: 480 };
+      const preferredId = readCameraPreference();
+      const openStream = async (): Promise<MediaStream> => {
+        try {
+          // The user's saved choice wins; otherwise let the browser pick a front-facing camera
+          const firstChoice = preferredId ? { deviceId: { exact: preferredId } } : { facingMode: 'user' };
+          return await navigator.mediaDevices.getUserMedia({ video: { ...size, ...firstChoice }, audio: false });
+        } catch (firstErr) {
+          // The first choice can be unplugged, or a virtual camera whose source app isn't running
+          // (e.g. OBS Virtual Camera). Try every other camera before giving up.
+          const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+          for (const cam of cams) {
+            if (cam.deviceId === preferredId) continue;
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({
+                video: { ...size, deviceId: { exact: cam.deviceId } },
+                audio: false,
+              });
+              console.log('[ErgoGotchi Vision] First-choice camera failed, using:', cam.label);
+              return stream;
+            } catch {
+              // Try the next camera
+            }
+          }
+          throw firstErr;
+        }
+      };
+      const open = openStream()
         .then(async (stream) => {
           video.srcObject = stream;
           await video.play();
+          this.activeCameraId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? null;
           return stream;
         });
       // If the camera answers after we gave up, release it instead of leaking it
@@ -159,8 +204,47 @@ export class VisionPipeline {
     }
   }
 
+  /** Cameras the user can pick from (labels need camera permission, which Electron grants). */
+  public async listCameras(): Promise<CameraOption[]> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices
+        .filter((d) => d.kind === 'videoinput' && d.deviceId)
+        .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Remember the chosen camera and restart capture on it. Recalibrate afterwards. */
+  public async switchCamera(deviceId: string): Promise<boolean> {
+    // Probe the new camera first: if it can't start (unplugged, or a virtual camera whose
+    // app is closed), leave the current one running untouched and report the failure.
+    try {
+      const probe = await withTimeout(
+        navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } }, audio: false }),
+        CAMERA_TIMEOUT_MS,
+        'Camera switch'
+      );
+      probe.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      console.warn('[ErgoGotchi Vision] Could not switch camera:', (err as Error)?.name, (err as Error)?.message);
+      return false;
+    }
+
+    try {
+      localStorage.setItem(CAMERA_PREF_KEY, deviceId);
+    } catch {
+      // Storage unavailable: the choice just won't persist
+    }
+    this.stopCamera();
+    await this.startCamera();
+    return this.activeCameraId === deviceId;
+  }
+
   public stopCamera() {
     this.isRunning = false;
+    this.activeCameraId = null;
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;

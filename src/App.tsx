@@ -17,7 +17,7 @@ import {
   NORMAL_PARAMS, 
   step 
 } from './dev1_sensing_and_scoring/scoring';
-import { visionPipeline } from './dev1_sensing_and_scoring/visionPipeline';
+import { visionPipeline, CAMERA_PREF_KEY, type CameraOption } from './dev1_sensing_and_scoring/visionPipeline';
 import { wsClient } from './net/websocketClient';
 import { MascotSprite } from './dev2_mascot_and_ui/MascotSprite';
 import type { PetEmote } from './dev2_mascot_and_ui/PixelMascot';
@@ -38,6 +38,8 @@ interface ElectronAPI {
   onRecalibrate: (cb: () => void) => void;
   onForceState: (cb: (state: PetState) => void) => void;
   onToggleDemoMode: (cb: () => void) => void;
+  setCameraList: (cameras: CameraOption[], activeId: string | null) => void;
+  onSelectCamera: (cb: (deviceId: string) => void) => void;
 }
 
 const electronAPI: ElectronAPI | undefined = (window as any).electronAPI;
@@ -47,6 +49,7 @@ const isPetWindow = !!electronAPI?.isElectron && !isDashboardView;
 
 // React StrictMode runs effects twice in dev; the camera must only be opened once
 let visionStarted = false;
+let cameraSwitchInFlight = false;
 
 export const App: React.FC = () => {
   // Application view state
@@ -62,6 +65,10 @@ export const App: React.FC = () => {
   const [calibrationProgress, setCalibrationProgress] = useState(0);
   const [isPresent, setIsPresent] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
+
+  // Camera picker state
+  const [cameras, setCameras] = useState<CameraOption[]>([]);
+  const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
 
   // Speech bubble state
   const [speechText, setSpeechText] = useState<string | null>(null);
@@ -126,6 +133,7 @@ export const App: React.FC = () => {
     const initVision = async () => {
       await visionPipeline.initMediaPipe();
       await visionPipeline.startCamera();
+      refreshCameras();
       // Auto-start 5s calibration
       setIsCalibrating(true);
       visionPipeline.startCalibration();
@@ -135,6 +143,59 @@ export const App: React.FC = () => {
       visionStarted = true;
       initVision();
     }
+  }, []);
+
+  // Camera picker: keep the list current, and tell Electron so the right-click menu can show it
+  const refreshCameras = async () => {
+    const list = await visionPipeline.listCameras();
+    setCameras(list);
+    setActiveCameraId(visionPipeline.activeCameraId);
+    if (isPetWindow) electronAPI?.setCameraList?.(list, visionPipeline.activeCameraId);
+  };
+
+  const handleSelectCamera = async (deviceId: string) => {
+    if (!deviceId || deviceId === visionPipeline.activeCameraId) return;
+    // One switch at a time: duplicate events (menu + storage, StrictMode listeners) must not open two streams
+    if (cameraSwitchInFlight) return;
+    cameraSwitchInFlight = true;
+    const all = await visionPipeline.listCameras();
+    const nameOf = (id: string | null) => all.find((c) => c.deviceId === id)?.label ?? 'that camera';
+    let switched = false;
+    try {
+      switched = await visionPipeline.switchCamera(deviceId);
+      await refreshCameras();
+    } finally {
+      cameraSwitchInFlight = false;
+    }
+    setSpeechCue(null);
+    if (!switched) {
+      // Nothing changed: say so instead of silently recalibrating on the old camera
+      const current = visionPipeline.activeCameraId;
+      setSpeechText(
+        `Couldn't start ${nameOf(deviceId)}. Is its app running?` +
+          (current ? ` Still using ${nameOf(current)}.` : '')
+      );
+      return;
+    }
+    setSpeechText(`Now watching through ${nameOf(deviceId)}.`);
+    // A different camera sees you from a different angle: the old baseline no longer applies
+    handleRecalibrate();
+  };
+
+  useEffect(() => {
+    // Cameras plugged in or removed
+    const onDeviceChange = () => refreshCameras();
+    // Another window (pet <-> dashboard) picked a camera: follow it
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === CAMERA_PREF_KEY && e.newValue) handleSelectCamera(e.newValue);
+    };
+    navigator.mediaDevices?.addEventListener('devicechange', onDeviceChange);
+    window.addEventListener('storage', onStorage);
+    electronAPI?.onSelectCamera?.((deviceId) => handleSelectCamera(deviceId));
+    return () => {
+      navigator.mediaDevices?.removeEventListener('devicechange', onDeviceChange);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   // Update calibration progress
@@ -328,6 +389,21 @@ export const App: React.FC = () => {
             />
             {isConnected ? 'LIVE WS' : 'LOCAL CACHE'}
           </span>
+
+          {/* Camera picker */}
+          <select
+            value={activeCameraId ?? ''}
+            onChange={(e) => handleSelectCamera(e.target.value)}
+            title="Camera used for posture tracking"
+            className="text-[11px] max-w-[180px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-200 border border-slate-700"
+          >
+            {!activeCameraId && <option value="">📷 No camera</option>}
+            {cameras.map((cam) => (
+              <option key={cam.deviceId} value={cam.deviceId}>
+                📷 {cam.label}
+              </option>
+            ))}
+          </select>
 
           {/* Demo mode pill */}
           <button

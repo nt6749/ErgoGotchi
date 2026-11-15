@@ -49,6 +49,11 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
   const bubbleTimerRef = useRef<any>(null);
 
+  // The parent passes a new callback on every render (25x/sec with a live camera).
+  // Read it through a ref so the typewriter below only restarts when the text changes.
+  const onDismissSpeechRef = useRef(onDismissSpeech);
+  onDismissSpeechRef.current = onDismissSpeech;
+
   // Typewriter effect for speech bubbles
   useEffect(() => {
     if (!speechText) {
@@ -71,14 +76,14 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     // Auto-dismiss after 8 seconds
     if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
     bubbleTimerRef.current = setTimeout(() => {
-      onDismissSpeech();
+      onDismissSpeechRef.current();
     }, 8000);
 
     return () => {
       clearInterval(interval);
       if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
     };
-  }, [speechText, onDismissSpeech]);
+  }, [speechText]);
 
   // Audio trigger on state changes
   useEffect(() => {
