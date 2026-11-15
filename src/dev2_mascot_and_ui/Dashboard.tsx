@@ -1125,7 +1125,7 @@ GROUP BY bucket, session_id;`}</pre>
                 <label className={`${PANEL} p-3.5 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-600 transition`}>
                   <div className="space-y-0.5">
                     <div className="text-xs font-semibold text-[var(--ink)]">
-                      Always show corn level above pet
+                      Always show corn level
                     </div>
                     <div className={`text-[11px] ${MUTED}`}>
                       When enabled, your corn count and level-up requirement stay visible above your pet at all times. By default (unchecked), the indicator only appears when your cursor hovers over the pet.
