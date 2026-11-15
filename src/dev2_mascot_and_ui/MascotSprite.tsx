@@ -77,9 +77,9 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('ergogotchi.alwaysShowCorn') !== 'false';
+      return localStorage.getItem('ergogotchi.alwaysShowCorn') === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
   const [webOffset, setWebOffset] = useState<{ x: number; y: number }>(() => {
@@ -253,7 +253,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'ergogotchi.alwaysShowCorn') {
-        setAlwaysShowCorn(e.newValue !== 'false');
+        setAlwaysShowCorn(e.newValue === 'true');
       }
     };
     const handleCustom = (e: any) => {
@@ -484,7 +484,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
           flashing ? 'animate-level-flash' : ''
         } ${refused ? 'animate-knife-shake' : ''}`}
         style={{
-          transform: `translateX(${posX}px) scaleX(${direction})`,
+          transform: `translateX(${posX}px)`,
         }}
       >
         {/* Cute Poppy Draggable Indicator Hint when hovered */}
@@ -499,7 +499,9 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         )}
 
         {/* Render State Specific SVG Graphic */}
-        {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote, look) : renderMascotGraphic(state, hp)}
+        <div style={{ transform: `scaleX(${direction})` }} className="transition-transform duration-150">
+          {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote, look) : renderMascotGraphic(state, hp)}
+        </div>
 
         {/* Level-up sparks and banner, and floating XP numbers (never block the mouse) */}
         {banner && (
@@ -523,7 +525,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         {cornPops.map((pop) => (
           <span
             key={pop.id}
-            className="absolute -top-1 right-0 pointer-events-none z-30 text-[11px] font-black text-white animate-xp-float whitespace-nowrap px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 border border-white shadow-sm"
+            className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 text-[11px] font-black text-white animate-xp-float whitespace-nowrap px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 border border-white shadow-sm flex items-center justify-center gap-1"
           >
             +{pop.amount} 🌽
           </span>
@@ -567,12 +569,12 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         {/* Corn status card: always shown if enabled (default), or shown on hover */}
         {pet && (alwaysShowCorn || hovered) && !banner && (
           <div className="absolute -top-11 left-1/2 -translate-x-1/2 pointer-events-none z-40 whitespace-nowrap text-center px-3 py-1 rounded-2xl bg-white/95 backdrop-blur-sm border-2 border-pink-300 shadow-[0_4px_12px_rgba(244,114,182,0.25)] transition-all duration-200 animate-pop-spring">
-            <div className={`text-[12px] font-black leading-tight flex items-center justify-center gap-1 ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
+            <div className={`text-[12px] font-black leading-tight flex items-center justify-center gap-1.5 ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
               <span>🌽</span>
               <span>{profile.corn}/{need}</span>
               {enoughCorn && <span className="text-[10px] bg-pink-100 text-pink-700 px-1.5 py-0.2 rounded-full border border-pink-200 font-bold">FEED!</span>}
             </div>
-            <div className="text-[9px] font-bold text-neutral-500 leading-tight">
+            <div className="text-[9px] font-bold text-neutral-500 leading-tight text-center">
               {enoughCorn ? `Click to feed ${profile.name} ✨` : `${need - profile.corn} more to level up`}
             </div>
           </div>

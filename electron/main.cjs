@@ -28,7 +28,7 @@ let dashboardWindow = null;
 let backendProcess = null;
 let isWizardActive = false;
 let currentDifficulty = 'normal';
-let alwaysShowCorn = true;
+let alwaysShowCorn = false;
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];

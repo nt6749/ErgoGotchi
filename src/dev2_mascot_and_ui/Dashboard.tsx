@@ -215,9 +215,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('ergogotchi.alwaysShowCorn') !== 'false';
+      return localStorage.getItem('ergogotchi.alwaysShowCorn') === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -235,7 +235,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'ergogotchi.alwaysShowCorn') {
-        setAlwaysShowCorn(e.newValue !== 'false');
+        setAlwaysShowCorn(e.newValue === 'true');
       }
     };
     const handleCustom = (e: any) => {
@@ -1128,7 +1128,7 @@ GROUP BY bucket, session_id;`}</pre>
                       Always show corn level above pet
                     </div>
                     <div className={`text-[11px] ${MUTED}`}>
-                      When enabled (default), your corn count and level-up requirement stay visible above your pet at all times. If unchecked, the indicator only appears while hovering.
+                      When enabled, your corn count and level-up requirement stay visible above your pet at all times. By default (unchecked), the indicator only appears when your cursor hovers over the pet.
                     </div>
                   </div>
                   <input
