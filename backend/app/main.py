@@ -5,9 +5,10 @@ import json
 import logging
 import os
 import sys
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 # Ensure backend root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -24,9 +25,12 @@ from app.grok_bot.service import grok_bot
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("ergogotchi.main")
 
-# Memory buffer for 1 Hz telemetry batch inserts
-telemetry_buffer: List[Dict[str, Any]] = []
+# Ring buffer for 1 Hz telemetry batch inserts with O(1) eviction
+telemetry_buffer: deque[Dict[str, Any]] = deque(maxlen=settings.BUFFER_MAX_SIZE)
 buffer_lock = asyncio.Lock()
+
+# In-memory session summary cache with 30s TTL
+summary_cache: Dict[str, Dict[str, Any]] = {}
 
 async def flush_buffer_task():
     """Periodically flush telemetry buffer into TimescaleDB/SQLite."""
@@ -79,12 +83,13 @@ async def lifespan(app: FastAPI):
             if telemetry_buffer:
                 logger.info("Executing final flush of %d telemetry records...", len(telemetry_buffer))
                 try:
-                    await db.insert_telemetry_batch(telemetry_buffer)
+                    await db.insert_telemetry_batch(list(telemetry_buffer))
                 except Exception as e:
                     logger.error("Error during final shutdown telemetry flush: %s", e)
                 telemetry_buffer.clear()
 
         await db.close()
+        await grok_bot.aclose()
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
@@ -124,10 +129,11 @@ async def get_session_series(session_id: str, minutes: int = Query(default=30, g
 
 @app.get("/sessions/{session_id}/summary")
 async def get_session_summary(session_id: str):
-    """Computes session overview and generates 3-sentence Gemini ergonomic coaching summary."""
+    """Computes session overview and generates 3-sentence Gemini ergonomic coaching summary with 30s cache."""
     rows = await db.get_series(session_id, minutes=120)
     if not rows:
         return {
+            "session_id": session_id,
             "summary": "No session telemetry recorded yet. Start sitting upright with your ErgoGotchi!",
             "stats": {"min_hp": 100, "avg_strain": 0.0, "minutes": 0, "avg_blink_rate": 15}
         }
@@ -142,12 +148,24 @@ async def get_session_summary(session_id: str):
         "avg_blink_rate": round(avg_blink, 1)
     }
 
+    cache_fingerprint = (session_id, len(rows), stats["min_hp"], round(stats["avg_strain"], 1))
+    now = asyncio.get_running_loop().time()
+    cached = summary_cache.get(session_id)
+    if cached and cached.get("fingerprint") == cache_fingerprint and (now - cached.get("ts", 0)) < 30.0:
+        return cached["data"]
+
     summary = await gemini_engine.generate_session_summary(stats)
-    return {
+    result = {
         "session_id": session_id,
         "stats": stats,
         "summary": summary
     }
+    summary_cache[session_id] = {
+        "fingerprint": cache_fingerprint,
+        "ts": now,
+        "data": result
+    }
+    return result
 
 @app.post("/grok-bot/webhook")
 async def dispatch_grok_bot(session_id: str):
@@ -205,12 +223,6 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
                     "state": msg.get("state")
                 }
                 async with buffer_lock:
-                    if len(telemetry_buffer) >= settings.BUFFER_MAX_SIZE:
-                        logger.warning(
-                            "Telemetry buffer reached capacity (%d); dropping oldest record to prevent memory growth.",
-                            len(telemetry_buffer)
-                        )
-                        telemetry_buffer.pop(0)
                     telemetry_buffer.append(record)
 
             # Contract 2: Intervention Request (when a posture trigger fires)

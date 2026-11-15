@@ -532,4 +532,7 @@ async def main_loop():
 
 
 if __name__ == "__main__":
-    asyncio.run(main_loop())
+    try:
+        asyncio.run(main_loop())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("\nExiting ErgoGotchi CLI. Keep sitting upright!")

@@ -32,7 +32,7 @@ async def run_simulator():
     try:
         while True:
             step_start = time.time()
-            now_iso = datetime.now(timezone.utc).isoformat()
+            now_dt = datetime.now(timezone.utc)
             batch = []
             
             for i, sid in enumerate(session_ids):
@@ -46,7 +46,7 @@ async def run_simulator():
                     state = "THRIVING" if hps[i] >= 80 else "NEUTRAL"
                 
                 batch.append({
-                    "recorded_at": now_iso,
+                    "recorded_at": now_dt,
                     "session_id": sid,
                     "present": True,
                     "forward_head": round(random.uniform(0.02, 0.16), 3),
@@ -70,12 +70,17 @@ async def run_simulator():
             sleep_time = max(0.0, BATCH_INTERVAL - (time.time() - step_start))
             await asyncio.sleep(sleep_time)
             
-    except KeyboardInterrupt:
-        print("\nSimulator stopped by user.")
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("\n\nSimulator stopped cleanly by user.")
         stats = await db.get_stats()
-        print("Database stats:", stats)
+        print("Final Tiger Data Stats:")
+        for k, v in stats.items():
+            print(f"  {k}: {v}")
     finally:
         await db.close()
 
 if __name__ == "__main__":
-    asyncio.run(run_simulator())
+    try:
+        asyncio.run(run_simulator())
+    except KeyboardInterrupt:
+        pass

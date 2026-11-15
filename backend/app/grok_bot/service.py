@@ -1,5 +1,6 @@
 """SpaceXSI Grok Bot / Discord / Slack notification service."""
 
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 import httpx
@@ -9,8 +10,26 @@ from app.config import settings
 logger = logging.getLogger("ergogotchi.grok")
 
 class GrokBotService:
-    @staticmethod
+    def __init__(self):
+        self._client: Optional[httpx.AsyncClient] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client.is_closed or self._loop is not loop:
+            self._client = httpx.AsyncClient(timeout=4.0)
+            self._loop = loop
+        return self._client
+
+    async def aclose(self):
+        """Cleanly close underlying HTTP connection pool."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
+        self._loop = None
+
     async def send_session_digest(
+        self,
         session_id: str,
         summary_text: str,
         stats: Dict[str, Any],
@@ -55,14 +74,14 @@ class GrokBotService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=4.0) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code < 300:
-                    logger.info("Successfully dispatched Grok Bot digest to webhook.")
-                    return True
-                else:
-                    logger.warning("Webhook returned status %d: %s", res.status_code, res.text)
-                    return False
+            client = self._get_client()
+            res = await client.post(url, json=payload)
+            if res.status_code < 300:
+                logger.info("Successfully dispatched Grok Bot digest to webhook.")
+                return True
+            else:
+                logger.warning("Webhook returned status %d: %s", res.status_code, res.text)
+                return False
         except Exception as e:
             logger.error("Failed to post to Grok Bot webhook: %s", e)
             return False

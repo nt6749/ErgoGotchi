@@ -37,6 +37,8 @@ class DatabaseManager:
         self.is_timescaledb: bool = False
         self.sqlite_conn: Optional[sqlite3.Connection] = None
         self._lock = asyncio.Lock()
+        self._stats_cache: Optional[Dict[str, Any]] = None
+        self._stats_ts: float = 0.0
 
     async def connect(self):
         """Attempt PostgreSQL/TimescaleDB connection; fall back to local SQLite if unavailable."""
@@ -67,11 +69,15 @@ class DatabaseManager:
         self._init_sqlite()
 
     def _init_sqlite(self):
-        """Initialise SQLite database schema."""
+        """Initialise SQLite database schema with OneDrive-safe WAL tuning."""
         logger.info("Initialising SQLite local store at: %s", settings.SQLITE_DB_PATH)
-        self.sqlite_conn = sqlite3.connect(settings.SQLITE_DB_PATH, check_same_thread=False)
+        self.sqlite_conn = sqlite3.connect(settings.SQLITE_DB_PATH, check_same_thread=False, timeout=5.0)
         self.sqlite_conn.row_factory = sqlite3.Row
         with self.sqlite_conn:
+            self.sqlite_conn.execute("PRAGMA busy_timeout = 5000;")
+            self.sqlite_conn.execute("PRAGMA journal_mode = WAL;")
+            self.sqlite_conn.execute("PRAGMA synchronous = NORMAL;")
+            self.sqlite_conn.execute("PRAGMA temp_store = MEMORY;")
             self.sqlite_conn.execute("""
                 CREATE TABLE IF NOT EXISTS ergo_telemetry (
                     recorded_at TEXT NOT NULL,
@@ -184,7 +190,7 @@ class DatabaseManager:
 
         if self.sqlite_conn:
             async with self._lock:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, self._insert_sqlite_sync, records)
 
     def _insert_sqlite_sync(self, records: List[Dict[str, Any]]):
@@ -241,11 +247,11 @@ class DatabaseManager:
                     ROUND(avg_blink_rate::numeric, 1) as avg_blink_rate,
                     min_hp
                 FROM ergo_1min
-                WHERE session_id = $1 AND bucket > now() - ($2 || ' minutes')::interval
+                WHERE session_id = $1 AND bucket > now() - make_interval(mins => $2)
                 ORDER BY bucket ASC;
                 """
                 async with self.pool.acquire() as conn:
-                    rows = await conn.fetch(query, sid, str(minutes))
+                    rows = await conn.fetch(query, sid, int(minutes))
                     return [
                         {
                             "bucket": r["bucket"].isoformat(),
@@ -268,7 +274,7 @@ class DatabaseManager:
 
         if self.sqlite_conn:
             async with self._lock:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, self._query_sqlite_series, session_id, minutes)
 
         return []
@@ -311,24 +317,54 @@ class DatabaseManager:
             })
         return results
 
+    def _count_sqlite_rows(self) -> int:
+        if not self.sqlite_conn:
+            return 0
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM ergo_telemetry;")
+        res = cursor.fetchone()
+        return int(res[0]) if res else 0
+
     async def get_stats(self) -> Dict[str, Any]:
-        """Return Tiger Data hypertable stats & row counts."""
+        """Return Tiger Data hypertable stats & row counts with 2-second TTL cache and single round-trip."""
+        now = asyncio.get_running_loop().time()
+        if self._stats_cache and (now - self._stats_ts) < 2.0:
+            return self._stats_cache
+
         if self.pool and self.is_timescaledb:
             try:
                 async with self.pool.acquire() as conn:
-                    row_count = await conn.fetchval("SELECT COUNT(*) FROM ergo_telemetry;")
-                    agg_count = await conn.fetchval("SELECT COUNT(*) FROM ergo_1min;")
-                    chunk_count = await conn.fetchval(
-                        "SELECT COUNT(*) FROM timescaledb_information.chunks WHERE hypertable_name = 'ergo_telemetry';"
-                    )
-                    return {
+                    # Triple fallback:
+                    # 1. approximate_row_count('ergo_telemetry')
+                    # 2. SUM(s.n_live_tup) across chunks from pg_stat_user_tables
+                    # 3. SELECT COUNT(*) FROM ergo_telemetry
+                    row = await conn.fetchrow("""
+                        SELECT
+                            COALESCE(
+                                NULLIF(approximate_row_count('ergo_telemetry'), 0),
+                                NULLIF((
+                                    SELECT SUM(s.n_live_tup)::bigint
+                                    FROM pg_stat_user_tables s
+                                    JOIN timescaledb_information.chunks c
+                                      ON s.schemaname = c.chunk_schema AND s.relname = c.chunk_name
+                                    WHERE c.hypertable_name = 'ergo_telemetry'
+                                ), 0),
+                                (SELECT COUNT(*) FROM ergo_telemetry)
+                            ) AS telemetry_rows,
+                            (SELECT COUNT(*) FROM ergo_1min) AS aggregate_rows,
+                            (SELECT COUNT(*) FROM timescaledb_information.chunks
+                             WHERE hypertable_name = 'ergo_telemetry') AS active_chunks;
+                    """)
+                    self._stats_cache = {
                         "storage_engine": "TimescaleDB (Tiger Data)",
-                        "telemetry_rows": row_count,
-                        "aggregate_rows": agg_count,
-                        "active_chunks": chunk_count,
+                        "telemetry_rows": int(row["telemetry_rows"] or 0),
+                        "aggregate_rows": int(row["aggregate_rows"] or 0),
+                        "active_chunks": int(row["active_chunks"] or 0),
                         "compression_enabled": True,
                         "status": "HEALTHY"
                     }
+                    self._stats_ts = now
+                    return self._stats_cache
             except Exception as e:
                 logger.error("Failed to query TimescaleDB stats: %s", e)
 
@@ -337,10 +373,10 @@ class DatabaseManager:
             self._init_sqlite()
 
         if self.sqlite_conn:
-            cursor = self.sqlite_conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM ergo_telemetry;")
-            row_count = cursor.fetchone()[0]
-            return {
+            async with self._lock:
+                loop = asyncio.get_running_loop()
+                row_count = await loop.run_in_executor(None, self._count_sqlite_rows)
+            self._stats_cache = {
                 "storage_engine": "SQLite Emulation Mode",
                 "telemetry_rows": row_count,
                 "aggregate_rows": 0,
@@ -348,11 +384,16 @@ class DatabaseManager:
                 "compression_enabled": False,
                 "status": "LOCAL_FALLBACK"
             }
+            self._stats_ts = now
+            return self._stats_cache
 
         return {"storage_engine": "None", "status": "DISCONNECTED"}
 
     async def close(self):
         """Cleanly close database connection pools and SQLite handle."""
+        self._stats_cache = None
+        self._stats_ts = 0.0
+
         if self.pool:
             try:
                 await self.pool.close()
