@@ -74,7 +74,12 @@ class GeminiPersonaEngine:
 
         try:
             from google import genai
-            self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            from google.genai import types
+            # Hard HTTP timeout so a slow/stuck Gemini request can't pin executor threads forever
+            self.client = genai.Client(
+                api_key=settings.GEMINI_API_KEY,
+                http_options=types.HttpOptions(timeout=settings.GEMINI_TIMEOUT_MS),
+            )
             logger.info("Google GenAI client initialised with model: %s", settings.GEMINI_MODEL)
         except Exception as e:
             logger.warning("Could not initialise Google GenAI SDK (%s). Running with canned fallbacks.", e)

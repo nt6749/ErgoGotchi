@@ -71,7 +71,7 @@ export class WebSocketClient {
   private getOrCreateSessionId(): string {
     let sid = localStorage.getItem('ergogotchi_session_id');
     if (!sid) {
-      sid = 'session_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+      sid = crypto.randomUUID();
       localStorage.setItem('ergogotchi_session_id', sid);
     }
     return sid;

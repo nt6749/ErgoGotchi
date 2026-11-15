@@ -132,4 +132,17 @@ describe('ErgoGotchi Scoring Engine', () => {
     expect(state.strainIndex).toBeLessThan(0.3);
     expect(state.state).toBe('THRIVING');
   });
+
+  it('does not drain HP from low blinking alone, but nudges with LOW_BLINK', () => {
+    let state = createInitialState();
+    const noBlinks = { ...PERFECT_SIGNALS, blink_rate_1m: 0 };
+    let nudged = false;
+    for (let i = 0; i < 30; i++) {
+      state = step(state, noBlinks, 1.0, DEMO_PARAMS, true, true);
+      if (state.triggerIntervention && state.interventionReason === 'LOW_BLINK') nudged = true;
+    }
+    expect(state.hp).toBe(100);
+    expect(state.state).not.toBe('WILTED');
+    expect(nudged).toBe(true);
+  });
 });

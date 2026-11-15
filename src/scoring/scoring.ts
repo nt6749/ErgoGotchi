@@ -110,7 +110,8 @@ export function step(
     { name: 'head_pitch', score: headPitchScore },
     { name: 'lean_in', score: leanInScore },
     { name: 'tilt', score: tiltScore },
-    { name: 'blink_rate', score: 0.6 * blinkScore },
+    // Kept below the 0.5 decay threshold: low blinking earns a LOW_BLINK nudge, never HP loss on its own
+    { name: 'blink_rate', score: 0.45 * blinkScore },
   ];
 
   // Maximum rule: single worst strain dictates strain index

@@ -15,8 +15,9 @@ function createPetWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
 
-  const initialWidth = 200;
-  const initialHeight = 190;
+  // Room for the mascot's ±40px wander and the speech bubble above it
+  const initialWidth = 280;
+  const initialHeight = 320;
   const initialX = screenWidth - initialWidth - 60;
   const initialY = screenHeight - initialHeight - 10;
 
@@ -49,6 +50,11 @@ function createPetWindow() {
     petWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   } else {
     petWindow.loadURL(VITE_DEV_SERVER_URL);
+  }
+
+  // Debug: set ERGO_DEVTOOLS=1 to open DevTools for the frameless pet window
+  if (process.env.ERGO_DEVTOOLS === '1') {
+    petWindow.webContents.openDevTools({ mode: 'detach' });
   }
 
   // Right-click context menu

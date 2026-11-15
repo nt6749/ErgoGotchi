@@ -15,8 +15,9 @@ class Settings(BaseModel):
     
     # Google Gemini API
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    # Use recommended fast stable flash model (fallback to gemini-2.5-flash / gemini-4-hydrogen)
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    # gemini-2.5-flash now returns 404 for new API keys
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    GEMINI_TIMEOUT_MS: int = int(os.getenv("GEMINI_TIMEOUT_MS", "15000"))
     
     # Tiger Data / TimescaleDB
     DATABASE_URL: str = os.getenv(

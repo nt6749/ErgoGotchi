@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PetState, StretchCue } from '../types';
 import { soundEffects } from './soundEffects';
+import { renderPixelMascot, USE_PIXEL_MASCOT } from './PixelMascot';
 
 interface MascotSpriteProps {
   state: PetState;
@@ -158,6 +159,8 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         onClick={handlePet}
         onDoubleClick={onOpenDashboard}
         onContextMenu={(e) => {
+          // In Electron, let the native right-click menu open instead
+          if ((window as any).electronAPI?.isElectron) return;
           e.preventDefault();
           onRecalibrate();
         }}
@@ -170,7 +173,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         }}
       >
         {/* Render State Specific SVG Graphic */}
-        {renderMascotGraphic(state, hp)}
+        {USE_PIXEL_MASCOT ? renderPixelMascot(state) : renderMascotGraphic(state, hp)}
       </div>
 
       {/* Micro Health Bar under Mascot */}

@@ -25,9 +25,11 @@ def test_stretch_instructions_complete():
         assert cue in STRETCH_INSTRUCTIONS
         assert len(STRETCH_INSTRUCTIONS[cue]) > 10
 
-def test_instant_cached_intervention():
+def test_instant_cached_intervention(monkeypatch):
     """Verify intervention responds in <10ms from cache without network blocking."""
     import asyncio
+    # Unit test must not hit the live Gemini API (it would block asyncio.run shutdown)
+    monkeypatch.setattr(gemini_engine, "client", None)
     resp = asyncio.run(gemini_engine.get_intervention(
         request_id="test-req-1",
         reason="SLOUCH",
