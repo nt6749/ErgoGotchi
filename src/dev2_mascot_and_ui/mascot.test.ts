@@ -295,7 +295,7 @@ describe('activity detection from the foreground window', () => {
   it('editors, terminals and work sites mean working', () => {
     expect(c('Code.exe', 'x').scene).toBe('WORKING');
     expect(c('WindowsTerminal', 'pwsh').scene).toBe('WORKING');
-    expect(c('chrome', 'nt6749/sunhacks-project2 - GitHub - Google Chrome').scene).toBe('WORKING');
+    expect(c('chrome', 'nt6749/ErgoGotchi - GitHub - Google Chrome').scene).toBe('WORKING');
   });
 
   it('anything else is idle', () => {

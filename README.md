@@ -6,22 +6,22 @@
 [![Google Gemini](https://img.shields.io/badge/Google%20Gemini-Powered-blue)](https://ai.google.dev/)
 [![Tiger Data](https://img.shields.io/badge/Tiger%20Data-TimescaleDB%20Hypertables-orange)](https://www.tigerdata.com/)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Edge%20Biometrics-cyan)](https://developers.google.com/mediapipe)
-[![Release](https://img.shields.io/github/v/release/nt6749/sunhacks-project2?color=emerald&label=Latest%20Release)](https://github.com/nt6749/sunhacks-project2/releases)
-[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-blue?logo=windows)](https://github.com/nt6749/sunhacks-project2/releases/latest)
-[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/sunhacks-project2/releases/latest)
+[![Release](https://img.shields.io/github/v/release/nt6749/ErgoGotchi?color=emerald&label=Latest%20Release)](https://github.com/nt6749/ErgoGotchi/releases)
+[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-blue?logo=windows)](https://github.com/nt6749/ErgoGotchi/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/ErgoGotchi/releases/latest)
 
 ---
 
 ### ⚡ Quick Downloads & Play (Hackathon Judges & Users)
 
-> 🚀 **[📥 Download Latest Official Release from GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** — Ready-to-run compiled binaries for Windows and macOS.
+> 🚀 **[📥 Download Latest Official Release from GitHub Releases](https://github.com/nt6749/ErgoGotchi/releases)** — Ready-to-run compiled binaries for Windows and macOS.
 
 | Platform | Recommended Installer | Alternative / Portable | Status |
 | :--- | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.3 Ready` |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 All Release Assets](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.3 Ready` |
+| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/ErgoGotchi/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/ErgoGotchi/releases) | `v1.0.3 Ready` |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/ErgoGotchi/releases) | [📦 All Release Assets](https://github.com/nt6749/ErgoGotchi/releases) | `v1.0.3 Ready` |
 
-> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.3.exe`), Portable (`ErgoGotchi-Portable-1.0.3.exe`), and macOS Disk Image (`ErgoGotchi-1.0.3.dmg`).
+> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/ErgoGotchi/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.3.exe`), Portable (`ErgoGotchi-Portable-1.0.3.exe`), and macOS Disk Image (`ErgoGotchi-1.0.3.dmg`).
 
 ---
 
@@ -144,8 +144,8 @@ Choose the method that works best for you:
 
 | Platform | Installer File | Installation Steps |
 | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Windows Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Download installer wizard.<br>2. Run the `.exe` installer wizard.<br>3. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>4. Check "Create Desktop Shortcut".<br>5. Click **Install** & launch! |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download macOS Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
+| **🪟 Windows (10/11)** | [📥 **Download Windows Setup Wizard (`.exe`)**](https://github.com/nt6749/ErgoGotchi/releases) | 1. Download installer wizard.<br>2. Run the `.exe` installer wizard.<br>3. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>4. Check "Create Desktop Shortcut".<br>5. Click **Install** & launch! |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download macOS Disk Image (`.dmg`)**](https://github.com/nt6749/ErgoGotchi/releases) | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
 
 #### 🪄 The First-Run Onboarding Wizard
 When you open ErgoGotchi for the first time, a cute setup wizard appears:
@@ -168,8 +168,8 @@ When you open ErgoGotchi for the first time, a cute setup wizard appears:
 
 #### 1. Clone & Set Up Environment
 ```bash
-git clone https://github.com/nt6749/sunhacks-project2.git
-cd sunhacks-project2
+git clone https://github.com/nt6749/ErgoGotchi.git
+cd ErgoGotchi
 cp .env.example .env
 ```
 

@@ -6,7 +6,7 @@
 ## ⚡ 1-Minute Setup in GitHub Web UI
 
 1. Open your repository on GitHub:  
-   👉 **[https://github.com/nt6749/sunhacks-project2/settings/rules](https://github.com/nt6749/sunhacks-project2/settings/rules)**
+   👉 **[https://github.com/nt6749/ErgoGotchi/settings/rules](https://github.com/nt6749/ErgoGotchi/settings/rules)**
 2. Click **"New ruleset"** ➔ **"New branch ruleset"**.
 3. Set **Ruleset Name**: `Protect Main Branch`.
 4. Set **Enforcement status**: `Active`.
