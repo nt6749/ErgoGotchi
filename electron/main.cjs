@@ -137,9 +137,9 @@ function createPetWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
 
-  // Room for the egg machine and the speech bubble above it
-  const initialWidth = 320;
-  const initialHeight = 460;
+  // Room for the egg machine and the speech bubble / update banner above it
+  const initialWidth = 340;
+  const initialHeight = 480;
   const defaultX = screenWidth - initialWidth - 60;
   const defaultY = screenHeight - initialHeight - 10;
 
@@ -229,8 +229,8 @@ function createPetWindow() {
           if (!petWindow) return;
           const primaryDisplay = screen.getPrimaryDisplay();
           const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
-          const initialWidth = 320;
-          const initialHeight = 460;
+          const initialWidth = 340;
+          const initialHeight = 480;
           const initialX = screenWidth - initialWidth - 60;
           const initialY = screenHeight - initialHeight - 10;
           petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
@@ -440,8 +440,8 @@ ipcMain.on('pet-dock-corner', () => {
   if (!petWindow) return;
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
-  const initialWidth = 320;
-  const initialHeight = 460;
+  const initialWidth = 340;
+  const initialHeight = 480;
   const initialX = screenWidth - initialWidth - 60;
   const initialY = screenHeight - initialHeight - 10;
   petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });

@@ -146,6 +146,10 @@ const electronAPI: ElectronAPI | undefined = (window as any).electronAPI;
 const isDashboardView = new URLSearchParams(window.location.search).get('view') === 'dashboard';
 // Electron's transparent pet window: render only the mascot, no browser demo chrome
 const isPetWindow = !!electronAPI?.isElectron && !isDashboardView;
+const captureMouse = {
+  onMouseEnter: () => electronAPI?.setIgnoreMouse?.(false),
+  onMouseLeave: () => electronAPI?.setIgnoreMouse?.(true),
+};
 
 // React StrictMode runs effects twice in dev; the camera must only be opened once
 let visionStarted = false;
@@ -832,7 +836,7 @@ export const App: React.FC = () => {
       if (electronAPI?.dockPet) {
         electronAPI.dockPet();
       } else if (electronAPI?.setPetBounds) {
-        electronAPI.setPetBounds({ width: 320, height: 460 });
+        electronAPI.setPetBounds({ width: 340, height: 480 });
       }
       electronAPI?.setIgnoreMouse?.(true);
     }
@@ -851,65 +855,87 @@ export const App: React.FC = () => {
 
   // Floating Update Notification Banner (when an update is found)
   const updateBanner = updateInfo?.updateAvailable && !showUpdateModal && (
-    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border-2 border-cyan-400 rounded-2xl px-4 py-2.5 shadow-2xl backdrop-blur-md flex items-center gap-3 animate-bounce">
-      <span className="text-xl">⚡</span>
-      <div className="text-left text-xs leading-tight">
-        <span className="font-bold text-white">Update {updateInfo.latestVersion} Available!</span>
-        <p className="text-[10px] text-slate-300">Click to download update & restart ErgoGotchi.</p>
+    <div
+      {...captureMouse}
+      className={`fixed top-2 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-[316px] bg-slate-900/98 border-2 border-cyan-400 rounded-2xl p-2.5 shadow-[0_10px_25px_-5px_rgba(34,211,238,0.3)] backdrop-blur-md flex flex-col gap-2 select-none animate-pop-spring ${
+        isPetWindow ? '' : 'sm:max-w-md sm:flex-row sm:items-center sm:justify-between sm:p-3'
+      }`}
+      style={{ WebkitAppRegion: 'no-drag' } as any}
+    >
+      <div className="flex items-start justify-between gap-1.5 flex-1 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-lg select-none text-cyan-400 animate-pulse">⚡</span>
+          <div className="text-left text-xs leading-tight min-w-0">
+            <span className="font-bold text-white block">
+              Update {updateInfo.latestVersion} Available!
+            </span>
+            <p className="text-[10px] text-slate-300">
+              Click to install update & restart.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setUpdateInfo((prev) => (prev ? { ...prev, updateAvailable: false } : null))}
+          className="text-slate-400 hover:text-slate-200 text-xs p-1 -mr-1 -mt-1 cursor-pointer transition"
+          title="Dismiss for now"
+        >
+          ✕
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={() => handleTriggerUpdate()}
-        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-400 hover:bg-cyan-300 text-slate-950 transition active:scale-95 shadow"
-      >
-        Update & Restart
-      </button>
-      <button
-        type="button"
-        onClick={() => setUpdateInfo((prev) => (prev ? { ...prev, updateAvailable: false } : null))}
-        className="text-slate-400 hover:text-slate-200 text-xs px-1"
-        title="Dismiss for now"
-      >
-        ✕
-      </button>
+
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => handleTriggerUpdate()}
+          className="flex-1 px-3 py-1.5 rounded-xl text-xs font-black bg-cyan-400 hover:bg-cyan-300 text-slate-950 transition active:scale-95 shadow-md flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+        >
+          <span>Update & Restart</span>
+          <span>🚀</span>
+        </button>
+      </div>
     </div>
   );
 
   // Fullscreen / Floating Update Progress Modal (when downloading/installing)
   const updateModal = showUpdateModal && (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-center">
-        <div className="w-16 h-16 mx-auto rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-3xl animate-bounce">
+    <div
+      {...captureMouse}
+      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 select-none"
+      style={{ WebkitAppRegion: 'no-drag' } as any}
+    >
+      <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl p-4 sm:p-6 w-full max-w-[310px] sm:max-w-md shadow-2xl space-y-3 sm:space-y-4 text-center">
+        <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-2xl sm:text-3xl animate-pulse">
           📦
         </div>
         <div>
-          <h3 className="text-lg font-bold text-white">Updating ErgoGotchi</h3>
-          <p className="text-xs text-slate-300 mt-1">
+          <h3 className="text-base sm:text-lg font-bold text-white">Updating ErgoGotchi</h3>
+          <p className="text-[11px] sm:text-xs text-slate-300 mt-0.5">
             Downloading version {updateInfo?.latestVersion || 'latest'} from GitHub...
           </p>
         </div>
 
-        <div className="space-y-1.5 pt-2">
+        <div className="space-y-1.5 pt-1">
           <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
             <div
               className="bg-gradient-to-r from-cyan-400 to-emerald-400 h-full transition-all duration-150"
               style={{ width: `${updateProgress?.percent || 0}%` }}
             />
           </div>
-          <div className="flex justify-between items-center text-[11px] font-mono text-slate-400 px-1">
+          <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-mono text-slate-400 px-1">
             <span>
               {updateProgress && updateProgress.totalBytes > 0
-                ? `${(updateProgress.receivedBytes / (1024 * 1024)).toFixed(1)} MB / ${(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`
-                : 'Connecting to GitHub...'}
+                ? `${(updateProgress.receivedBytes / (1024 * 1024)).toFixed(1)} / ${(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`
+                : 'Connecting...'}
             </span>
             <span className="text-cyan-300 font-bold">{updateProgress?.percent || 0}%</span>
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-400 italic">
+        <p className="text-[10px] sm:text-[11px] text-slate-400 italic">
           {updateProgress && updateProgress.percent >= 100
             ? '✓ Download complete! Launching installer and restarting...'
-            : 'Please wait while the update downloads. ErgoGotchi will restart automatically.'}
+            : 'ErgoGotchi will restart automatically.'}
         </p>
       </div>
     </div>
