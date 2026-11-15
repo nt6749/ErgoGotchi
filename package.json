@@ -30,20 +30,45 @@
     ],
     "mac": {
       "target": [
-        "dir",
-        "dmg"
+        "dmg",
+        "dir"
       ],
       "category": "public.app-category.productivity"
     },
+    "dmg": {
+      "title": "Install ErgoGotchi",
+      "contents": [
+        {
+          "x": 130,
+          "y": 200
+        },
+        {
+          "x": 410,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
     "win": {
       "target": [
-        "portable",
-        "nsis"
+        "nsis",
+        "portable"
       ]
     },
     "nsis": {
-      "oneClick": true,
-      "perMachine": false
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ErgoGotchi",
+      "uninstallDisplayName": "ErgoGotchi Desktop Companion",
+      "runAfterFinish": true
     }
   },
   "dependencies": {

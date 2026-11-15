@@ -134,6 +134,10 @@ function createPetWindow() {
   petWindow.webContents.on('context-menu', () => {
     const contextMenu = Menu.buildFromTemplate([
       {
+        label: '🪄 Setup Wizard & Permissions',
+        click: () => petWindow.webContents.send('menu-open-wizard'),
+      },
+      {
         label: '🎯 Recalibrate Posture (C)',
         click: () => petWindow.webContents.send('menu-recalibrate'),
       },
@@ -220,9 +224,38 @@ ipcMain.on('pet-move', (event, { x, y }) => {
 });
 
 ipcMain.on('pet-set-bounds', (event, bounds) => {
-  if (petWindow) {
+  if (!petWindow) return;
+  if (bounds.center) {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+    const w = bounds.width || 460;
+    const h = bounds.height || 620;
+    const x = Math.max(0, Math.round((screenWidth - w) / 2));
+    const y = Math.max(0, Math.round((screenHeight - h) / 2));
+    petWindow.setBounds({ x, y, width: w, height: h });
+  } else {
     petWindow.setBounds(bounds);
   }
+});
+
+ipcMain.on('pet-center', (event, { width = 460, height = 620 } = {}) => {
+  if (!petWindow) return;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+  const x = Math.max(0, Math.round((screenWidth - width) / 2));
+  const y = Math.max(0, Math.round((screenHeight - height) / 2));
+  petWindow.setBounds({ x, y, width, height });
+});
+
+ipcMain.on('pet-dock-corner', () => {
+  if (!petWindow) return;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+  const initialWidth = 280;
+  const initialHeight = 320;
+  const initialX = screenWidth - initialWidth - 60;
+  const initialY = screenHeight - initialHeight - 10;
+  petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
 });
 
 ipcMain.on('pet-ignore-mouse', (event, ignore) => {

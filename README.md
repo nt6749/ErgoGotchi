@@ -100,21 +100,52 @@ $$\text{strain} = \max(\text{forward\_head}_s,\ \text{head\_drop}_s,\ \text{head
 
 ---
 
-## 🚀 Quickstart & Setup Guide
+## 💾 Installation & Setup Guide
 
-### Prerequisites
-- Node.js (v18+) & npm
-- Python (3.10+)
-- Docker & Docker Compose *(optional for local TimescaleDB; automatic SQLite fallback is included)*
+Choose the method that works best for you:
 
-### 1. Clone & Set Up Environment
+### 🌟 Method 1: Guided Installation Wizard (Recommended)
+*The fastest, easiest way to install ErgoGotchi—perfect for beginners and judges!*
+
+| Platform | Installer File | Installation Steps |
+| :--- | :--- | :--- |
+| **🪟 Windows (10/11)** | **[`ErgoGotchi-Setup-1.0.0.exe`](https://github.com/nt6749/sunhacks-project2/releases)** | 1. Run the `.exe` installer wizard.<br>2. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>3. Check "Create Desktop Shortcut".<br>4. Click **Install** & launch! |
+| **🍏 macOS (Apple Silicon / Intel)** | **[`ErgoGotchi-1.0.0.dmg`](https://github.com/nt6749/sunhacks-project2/releases)** | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
+
+#### 🪄 The First-Run Onboarding Wizard
+When you open ErgoGotchi for the first time, a cute setup wizard appears:
+1. **Welcome Your New Pet**: Meet your pixel duck and learn how posture HP works.
+2. **Camera & Privacy Check**: One-click camera test with live preview and camera device dropdown (*100% on-device AI—zero video frames ever leave your laptop*).
+3. **8-Bit Sound Test**: Hear the procedural retro audio chime.
+4. **5-Second Upright Posture Calibration**: Sit tall, look at your monitor naturally, and lock in your baseline zero-point.
+5. **Ready to Play**: Transition directly into the desktop companion!
+
+---
+
+### 📦 Method 2: Standalone Portable Binaries (No Installation Required)
+*If you don't want an installer and just want a single file to double-click:*
+- **Windows Portable**: Download `ErgoGotchi 1.0.0.exe` and double-click to run anywhere (USB drive, Desktop, etc.).
+- **macOS Application Bundle**: Download `ErgoGotchi.app` and double-click to launch directly.
+
+---
+
+### 💻 Method 3: Developer Setup from Source (CLI)
+*For developers modifying source code or contributing:*
+
+#### Prerequisites
+- **Python (3.10+)**: Make sure `python --version` works in your terminal.
+- **Node.js (v18 or v20+ LTS) & npm**:
+  - *macOS*: `brew install node`
+  - *Windows*: Download and run the official installer from [nodejs.org](https://nodejs.org/) or run `winget install OpenJS.NodeJS.LTS`.
+
+#### 1. Clone & Set Up Environment
 ```bash
 git clone https://github.com/nt6749/sunhacks-project2.git
 cd sunhacks-project2
 cp .env.example .env
 ```
 
-### 2. Start Backend Service
+#### 2. Start Backend Service
 **On macOS / Linux:**
 ```bash
 python3 -m venv .venv
@@ -123,44 +154,48 @@ pip install -r backend/requirements.txt
 ./scripts/start_backend.sh
 ```
 
-**On Windows (Command Prompt or PowerShell):**
+**On Windows (PowerShell / Command Prompt):**
 ```cmd
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r backend\requirements.txt
 scripts\start_backend.bat
 ```
-*(Note: If PostgreSQL/TimescaleDB is not running locally, ErgoGotchi automatically starts in SQLite emulation mode, ensuring 100% zero-config operation on both Windows and Mac!)*
+*(Note: If TimescaleDB is not running locally, ErgoGotchi automatically starts in SQLite emulation mode with zero configuration needed!)*
 
-### 3. Start Frontend & Desktop App
-**On any OS (Windows, macOS, Linux):**
+#### 3. Start Frontend & Desktop App
 ```bash
 # Install frontend dependencies
 npm install
 
-# Option A: Run Vite Web App (Runs in your browser with desktop simulator)
+# Option A: Run in Browser with Desktop Simulator
 npm run dev
 
 # Option B: Run Native Electron Transparent Desktop Pet
 npm run electron
+
+# Option C: One-Click Unified Launcher (starts both backend & electron)
+node scripts/launcher.cjs
 ```
-*(On Windows, you can also double-click `scripts\start_frontend.bat`)*
 
-### 4. Build Standalone Desktop Apps (.exe & .app)
-You can package standalone executables that run directly without needing a terminal:
-
-**🪟 For Windows (`.exe`):**
+#### 4. Packaging Installers Locally
 ```bash
+# Build Windows NSIS Setup Wizard & Portable (.exe)
 npm run package:win
-```
-- **Portable App (Zero Installation)**: `release/ErgoGotchi 1.0.0.exe` *(double-click to run anywhere)*
-- **Windows Setup Installer**: `release/ErgoGotchi Setup 1.0.0.exe`
 
-**🍏 For macOS (`.app`):**
-```bash
+# Build macOS DMG & App Bundle (.dmg, .app)
 npm run package:mac
 ```
-- **Native macOS Application**: `release/mac-arm64/ErgoGotchi.app` *(double-click in Finder or run `open release/mac-arm64/ErgoGotchi.app`)*
+*(Note: You can also use our automated GitHub Actions workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) to compile installers in the cloud on every release!)*
+
+---
+
+### 🐳 Method 4: Docker Compose Stack (Tiger Data & Cloud Brain)
+*For running the production multi-tenant backend with TimescaleDB hypertables on Vultr or locally:*
+```bash
+docker compose up -d
+```
+Ingests 1 Hz telemetry into `ergo_telemetry` and populates the continuous aggregate view `ergo_1min`.
 
 ---
 
