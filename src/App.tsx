@@ -75,6 +75,7 @@ interface ElectronAPI {
   onAddCorn: (cb: (amount: number) => void) => void;
   onResetGrowth: (cb: () => void) => void;
   onOpenWizard?: (cb: () => void) => void;
+  setWizardActive?: (active: boolean) => void;
   centerPet?: (width?: number, height?: number) => void;
   dockPet?: () => void;
 }
@@ -538,19 +539,23 @@ export const App: React.FC = () => {
 
   // Handle dynamic pet window size expansion & centering for onboarding wizard
   useEffect(() => {
-    if (isPetWindow && showWizard) {
-      if (electronAPI?.centerPet) {
-        electronAPI.centerPet(480, 640);
-      } else if (electronAPI?.setPetBounds) {
-        electronAPI.setPetBounds({ width: 480, height: 640, center: true });
+    if (isPetWindow) {
+      electronAPI?.setWizardActive?.(showWizard);
+      if (showWizard) {
+        if (electronAPI?.centerPet) {
+          electronAPI.centerPet(480, 640);
+        } else if (electronAPI?.setPetBounds) {
+          electronAPI.setPetBounds({ width: 480, height: 640, center: true });
+        }
+        electronAPI?.setIgnoreMouse?.(false);
       }
-      electronAPI?.setIgnoreMouse?.(false);
     }
   }, [isPetWindow, showWizard]);
 
   const handleWizardComplete = () => {
     setShowWizard(false);
     if (isPetWindow) {
+      electronAPI?.setWizardActive?.(false);
       // Return to original corner dock position
       if (electronAPI?.dockPet) {
         electronAPI.dockPet();

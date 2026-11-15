@@ -14,6 +14,7 @@ const { startActivityWatcher } = require('./activityWatcher.cjs');
 let petWindow = null;
 let dashboardWindow = null;
 let backendProcess = null;
+let isWizardActive = false;
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
@@ -144,8 +145,9 @@ function createPetWindow() {
     petWindow.webContents.openDevTools({ mode: 'detach' });
   }
 
-  // Right-click context menu
+  // Right-click context menu (disabled while setup wizard is active)
   petWindow.webContents.on('context-menu', () => {
+    if (isWizardActive) return;
     const contextMenu = Menu.buildFromTemplate([
       {
         label: '🪄 Setup Wizard & Permissions',
@@ -310,6 +312,10 @@ ipcMain.on('camera-list', (event, { cameras, activeId }) => {
 
 ipcMain.on('open-dashboard', () => {
   createDashboardWindow();
+});
+
+ipcMain.on('wizard-active', (event, active) => {
+  isWizardActive = !!active;
 });
 
 app.whenReady().then(async () => {

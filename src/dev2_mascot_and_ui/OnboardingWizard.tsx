@@ -202,7 +202,10 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   };
 
   return (
-    <div className="w-[450px] max-w-full mx-auto bg-slate-900/95 text-white border-2 border-emerald-400/80 rounded-3xl shadow-2xl p-6 backdrop-blur-xl flex flex-col justify-between select-none relative z-50">
+    <div 
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      className="w-[450px] max-w-full mx-auto bg-slate-900/95 text-white border-2 border-emerald-400/80 rounded-3xl shadow-2xl p-6 backdrop-blur-xl flex flex-col justify-between select-none relative z-50"
+    >
       {/* Top Header / Draggable App Titlebar */}
       <div 
         className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 select-none cursor-move"
