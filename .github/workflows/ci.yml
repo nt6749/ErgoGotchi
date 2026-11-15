@@ -1,0 +1,43 @@
+name: CI - ErgoGotchi Test & Build Gatekeeper
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    name: Verify Tests & Compilation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Run Frontend Scoring Unit Tests
+        run: npm test
+
+      - name: Verify TypeScript & Frontend Production Build
+        run: npm run build
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Backend Dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run Backend Engine Unit Tests
+        run: pytest backend/tests/test_engine.py

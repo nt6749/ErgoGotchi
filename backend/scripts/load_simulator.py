@@ -74,6 +74,8 @@ async def run_simulator():
         print("\nSimulator stopped by user.")
         stats = await db.get_stats()
         print("Database stats:", stats)
+    finally:
+        await db.close()
 
 if __name__ == "__main__":
     asyncio.run(run_simulator())

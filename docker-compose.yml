@@ -31,7 +31,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:password123@timescaledb:5432/ergogotchi
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=gemini-2.5-flash
+      - GEMINI_MODEL=gemini-3.8-flash
       - SHARED_TOKEN=ergogotchi_sunhacks_2026_secret
       - GROK_WEBHOOK_URL=${GROK_WEBHOOK_URL:-}
     ports:

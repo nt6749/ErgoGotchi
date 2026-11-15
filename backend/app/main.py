@@ -31,18 +31,24 @@ buffer_lock = asyncio.Lock()
 async def flush_buffer_task():
     """Periodically flush telemetry buffer into TimescaleDB/SQLite."""
     while True:
-        await asyncio.sleep(settings.FLUSH_INTERVAL_SECONDS)
-        batch = []
-        async with buffer_lock:
-            if telemetry_buffer:
-                batch = list(telemetry_buffer)
-                telemetry_buffer.clear()
+        try:
+            await asyncio.sleep(settings.FLUSH_INTERVAL_SECONDS)
+            batch = []
+            async with buffer_lock:
+                if telemetry_buffer:
+                    batch = list(telemetry_buffer)
+                    telemetry_buffer.clear()
 
-        if batch:
-            try:
-                await db.insert_telemetry_batch(batch)
-            except Exception as e:
-                logger.error("Error flushing telemetry buffer: %s", e)
+            if batch:
+                try:
+                    await db.insert_telemetry_batch(batch)
+                    logger.debug("Successfully flushed %d telemetry records to database.", len(batch))
+                except Exception as e:
+                    logger.error("Error flushing telemetry buffer (%d records dropped): %s", len(batch), e, exc_info=True)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Unexpected error in flush_buffer_task loop: %s", e)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -51,13 +57,28 @@ async def lifespan(app: FastAPI):
     await db.connect()
     asyncio.create_task(gemini_engine.warm_cache())
     flusher = asyncio.create_task(flush_buffer_task())
-    yield
-    # Shutdown
-    flusher.cancel()
-    # Final flush
-    async with buffer_lock:
-        if telemetry_buffer:
-            await db.insert_telemetry_batch(telemetry_buffer)
+    try:
+        yield
+    finally:
+        # Shutdown
+        logger.info("Shutting down %s...", settings.APP_NAME)
+        flusher.cancel()
+        try:
+            await flusher
+        except asyncio.CancelledError:
+            pass
+
+        # Final flush of remaining buffer
+        async with buffer_lock:
+            if telemetry_buffer:
+                logger.info("Executing final flush of %d telemetry records...", len(telemetry_buffer))
+                try:
+                    await db.insert_telemetry_batch(telemetry_buffer)
+                except Exception as e:
+                    logger.error("Error during final shutdown telemetry flush: %s", e)
+                telemetry_buffer.clear()
+
+        await db.close()
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
@@ -155,7 +176,8 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
             text_data = await websocket.receive_text()
             try:
                 msg = json.loads(text_data)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as jde:
+                logger.warning("Malformed JSON received on WebSocket (ignoring): %s | Raw payload: %.100s", jde, text_data)
                 continue
 
             msg_type = msg.get("type")
@@ -177,6 +199,12 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
                     "state": msg.get("state")
                 }
                 async with buffer_lock:
+                    if len(telemetry_buffer) >= settings.BUFFER_MAX_SIZE:
+                        logger.warning(
+                            "Telemetry buffer reached capacity (%d); dropping oldest record to prevent memory growth.",
+                            len(telemetry_buffer)
+                        )
+                        telemetry_buffer.pop(0)
                     telemetry_buffer.append(record)
 
             # Contract 2: Intervention Request (when a posture trigger fires)
@@ -184,22 +212,41 @@ async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="
                 request_id = msg.get("request_id", "")
                 reason = msg.get("reason", "SLOUCH")
                 context = msg.get("context", {})
+                logger.info(
+                    "Intervention requested [req_id=%s, reason=%s, hp=%s, worst_signal=%s]",
+                    request_id, reason, context.get("hp"), context.get("worst_signal")
+                )
 
                 intervention = await gemini_engine.get_intervention(
                     request_id=request_id,
                     reason=reason,
                     context=context
                 )
+                logger.info(
+                    "Intervention dispatched [req_id=%s, cue=%s, severity=%s, source=%s]",
+                    request_id, intervention.get("cue"), intervention.get("severity"), intervention.get("source")
+                )
                 await websocket.send_text(json.dumps(intervention))
+
+            # Health / Ping-Pong heartbeat
+            elif msg_type == "ping":
+                await websocket.send_text(json.dumps({"type": "pong", "ts": datetime.now(timezone.utc).isoformat()}))
+
+            else:
+                logger.debug("Received unhandled WebSocket message type: '%s'", msg_type)
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected.")
     except Exception as e:
-        logger.error("WebSocket runtime error: %s", e)
+        logger.error("WebSocket runtime error: %s", e, exc_info=True)
 
 # Mount static files if frontend is built
-if os.path.exists("dist"):
-    app.mount("/", StaticFiles(directory="dist", html=True), name="static")
+dist_dir = os.path.join(os.path.dirname(__file__), "..", "..", "dist")
+if not os.path.exists(dist_dir) and os.path.exists("dist"):
+    dist_dir = "dist"
+
+if os.path.exists(dist_dir):
+    app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

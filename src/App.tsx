@@ -20,11 +20,37 @@ import {
 import { visionPipeline } from './dev1_sensing_and_scoring/visionPipeline';
 import { wsClient } from './net/websocketClient';
 import { MascotSprite } from './dev2_mascot_and_ui/MascotSprite';
+import type { PetEmote } from './dev2_mascot_and_ui/PixelMascot';
+
+/** Posture warnings clear after this many consecutive seconds of good posture. */
+const CLEAR_WARNING_AFTER_GOOD_SECONDS = 2;
+/** Strain below this counts as "sitting up" (same line where HP stops draining). */
+const GOOD_POSTURE_STRAIN = 0.5;
+const POSTURE_CUES: StretchCue[] = ['CHIN_TUCK', 'SHOULDER_ROLL', 'SIT_BACK'];
+
+/** How long the "don't duck with me" knife warning stays up (matches the speech bubble). */
+const KNIFE_EMOTE_MS = 8000;
 import { Dashboard } from './dev2_mascot_and_ui/Dashboard';
+
+interface ElectronAPI {
+  isElectron: boolean;
+  openDashboard: () => void;
+  onRecalibrate: (cb: () => void) => void;
+  onForceState: (cb: (state: PetState) => void) => void;
+  onToggleDemoMode: (cb: () => void) => void;
+}
+
+const electronAPI: ElectronAPI | undefined = (window as any).electronAPI;
+const isDashboardView = new URLSearchParams(window.location.search).get('view') === 'dashboard';
+// Electron's transparent pet window: render only the mascot, no browser demo chrome
+const isPetWindow = !!electronAPI?.isElectron && !isDashboardView;
+
+// React StrictMode runs effects twice in dev; the camera must only be opened once
+let visionStarted = false;
 
 export const App: React.FC = () => {
   // Application view state
-  const [showDashboard, setShowDashboard] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(isDashboardView);
   const [isDemoMode, setIsDemoMode] = useState(true); // Default to Demo mode for sunhacks judging!
   const [forcedState, setForcedState] = useState<PetState | null>(null);
 
@@ -41,6 +67,15 @@ export const App: React.FC = () => {
   const [speechText, setSpeechText] = useState<string | null>(null);
   const [speechCue, setSpeechCue] = useState<StretchCue | null>(null);
 
+  // Temporary pet reaction shown on top of its normal look
+  const [emote, setEmote] = useState<PetEmote | null>(null);
+  const emoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showEmote = (e: PetEmote, ms: number) => {
+    setEmote(e);
+    if (emoteTimerRef.current) clearTimeout(emoteTimerRef.current);
+    emoteTimerRef.current = setTimeout(() => setEmote(null), ms);
+  };
+
   const scoringStateRef = useRef<ScoringState>(scoringState);
   scoringStateRef.current = scoringState;
 
@@ -52,10 +87,25 @@ export const App: React.FC = () => {
 
   const sessionStartTimeRef = useRef<number>(Date.now());
 
+  // Latest vision output, read by the 1 Hz loop without restarting it (signals arrive at 25 fps)
+  const currentSignalsRef = useRef<BiometricSignals | null>(null);
+  currentSignalsRef.current = currentSignals;
+  const isPresentRef = useRef<boolean>(isPresent);
+  isPresentRef.current = isPresent;
+
+  const speechCueRef = useRef<StretchCue | null>(speechCue);
+  speechCueRef.current = speechCue;
+  const emoteRef = useRef<PetEmote | null>(emote);
+  emoteRef.current = emote;
+  const goodPostureSecondsRef = useRef(0);
+
   // 1. Initialise Vision Pipeline & WebSocket Client
   useEffect(() => {
     wsClient.onConnectionChange = (connected) => setIsConnected(connected);
     wsClient.onInterventionReceived = (msg) => {
+      // A slow (e.g. Gemini) reply can land after the user already sat up: don't nag then
+      const postureCue = POSTURE_CUES.includes(msg.cue as StretchCue);
+      if (postureCue && scoringStateRef.current.strainIndex < GOOD_POSTURE_STRAIN) return;
       setSpeechText(msg.text);
       setSpeechCue(msg.cue);
     };
@@ -81,11 +131,10 @@ export const App: React.FC = () => {
       visionPipeline.startCalibration();
     };
 
-    initVision();
-
-    return () => {
-      visionPipeline.stopCamera();
-    };
+    if (!visionStarted) {
+      visionStarted = true;
+      initVision();
+    }
   }, []);
 
   // Update calibration progress
@@ -106,6 +155,8 @@ export const App: React.FC = () => {
     const loopInterval = setInterval(() => {
       const params: ScoringParams = isDemoModeRef.current ? DEMO_PARAMS : NORMAL_PARAMS;
       const prev = scoringStateRef.current;
+      const currentSignals = currentSignalsRef.current;
+      const isPresent = isPresentRef.current;
 
       // Execute pure scoring step
       let next = step(
@@ -127,6 +178,20 @@ export const App: React.FC = () => {
 
       setScoringState(next);
 
+      // Clear posture warnings (bubble + knife) shortly after the user sits up
+      const goodPosture = next.state !== 'CALIBRATING' && next.strainIndex < GOOD_POSTURE_STRAIN;
+      goodPostureSecondsRef.current = goodPosture ? goodPostureSecondsRef.current + 1 : 0;
+      if (goodPostureSecondsRef.current >= CLEAR_WARNING_AFTER_GOOD_SECONDS) {
+        if (speechCueRef.current && POSTURE_CUES.includes(speechCueRef.current as StretchCue)) {
+          setSpeechText(null);
+          setSpeechCue(null);
+        }
+        if (emoteRef.current === 'KNIFE') {
+          if (emoteTimerRef.current) clearTimeout(emoteTimerRef.current);
+          setEmote(null);
+        }
+      }
+
       // Contract 1: Emit 1 Hz Telemetry over WebSocket
       wsClient.sendTelemetry({
         present: isPresent,
@@ -144,6 +209,9 @@ export const App: React.FC = () => {
 
       // Contract 2: Emit Intervention Request if trigger condition met
       if (next.triggerIntervention && next.interventionReason) {
+        // Bad posture (slouching or leaning in too close) -> knife warning, even when offline
+        if (next.interventionReason === 'SLOUCH') showEmote('KNIFE', KNIFE_EMOTE_MS);
+
         const sessionMins = Math.round((Date.now() - sessionStartTimeRef.current) / 60000);
         wsClient.requestIntervention(next.interventionReason, {
           minutes_in_session: Math.max(1, sessionMins),
@@ -156,7 +224,7 @@ export const App: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(loopInterval);
-  }, [currentSignals, isPresent]);
+  }, []);
 
   // 3. Hotkeys handler for live judge walkthrough
   useEffect(() => {
@@ -173,6 +241,9 @@ export const App: React.FC = () => {
       } else if (e.key === '4') {
         // Hotkey 4: Release override
         setForcedState(null);
+      } else if (e.key === '5') {
+        // Hotkey 5: preview the "don't duck with me" knife warning
+        showEmote('KNIFE', KNIFE_EMOTE_MS);
       } else if (e.key === 'd' || e.key === 'D') {
         // Toggle Demo Mode
         setIsDemoMode((prev) => !prev);
@@ -191,7 +262,49 @@ export const App: React.FC = () => {
     visionPipeline.startCalibration();
   };
 
+  // 4. Electron native right-click menu actions
+  useEffect(() => {
+    if (!electronAPI) return;
+    electronAPI.onRecalibrate(() => handleRecalibrate());
+    electronAPI.onForceState((s) => setForcedState(s));
+    electronAPI.onToggleDemoMode(() => setIsDemoMode((prev) => !prev));
+  }, []);
+
+  const handleOpenDashboard = () => {
+    if (electronAPI) electronAPI.openDashboard();
+    else setShowDashboard(true);
+  };
+
   const activeState = forcedState || scoringState.state;
+
+  if (isPetWindow) {
+    return (
+      <div className="w-screen h-screen bg-transparent flex flex-col items-center justify-end overflow-hidden select-none pb-1">
+        {isCalibrating && (
+          <div className="mb-2 px-3 py-2 rounded-xl bg-slate-900/90 border border-cyan-400/60 text-center shadow-xl">
+            <p className="text-[11px] font-semibold text-white">Sit tall… calibrating</p>
+            <div className="w-36 bg-slate-800 rounded-full h-1.5 mt-1.5 overflow-hidden">
+              <div
+                className="bg-cyan-400 h-full transition-all duration-200"
+                style={{ width: `${calibrationProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+        <MascotSprite
+          state={activeState}
+          hp={scoringState.hp}
+          isReviving={scoringState.isReviving}
+          speechText={speechText}
+          speechCue={speechCue}
+          emote={emote}
+          onDismissSpeech={() => setSpeechText(null)}
+          onOpenDashboard={handleOpenDashboard}
+          onRecalibrate={handleRecalibrate}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950/90 text-white flex flex-col justify-between p-4 font-sans select-none relative overflow-hidden">
@@ -290,8 +403,9 @@ export const App: React.FC = () => {
                 isReviving={scoringState.isReviving}
                 speechText={speechText}
                 speechCue={speechCue}
+          emote={emote}
                 onDismissSpeech={() => setSpeechText(null)}
-                onOpenDashboard={() => setShowDashboard(true)}
+                onOpenDashboard={handleOpenDashboard}
                 onRecalibrate={handleRecalibrate}
               />
             </div>

@@ -6,6 +6,18 @@
 
 import { BaselineCalibration, BiometricSignals } from '../types';
 
+// Must match the installed @mediapipe/tasks-vision version (JS and WASM must agree)
+const MEDIAPIPE_VERSION = '0.10.35';
+const MEDIAPIPE_TIMEOUT_MS = 30000;
+const CAMERA_TIMEOUT_MS = 10000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${what} timed out after ${ms / 1000}s`)), ms)),
+  ]);
+}
+
 export class VisionPipeline {
   private videoElement: HTMLVideoElement | null = null;
   private isRunning: boolean = false;
@@ -41,6 +53,7 @@ export class VisionPipeline {
 
   // Blink state tracking
   private blinkTimestamps: number[] = [];
+  private blinkTrackingStartedAt: number = Date.now();
   private eyeClosedStartTime: number | null = null;
 
   // Smoothing buffers (1-second median smoothing)
@@ -70,6 +83,15 @@ export class VisionPipeline {
   /** Initialize MediaPipe Tasks-Vision (with fallback) */
   public async initMediaPipe(): Promise<boolean> {
     try {
+      return await withTimeout(this.loadMediaPipe(), MEDIAPIPE_TIMEOUT_MS, 'MediaPipe load');
+    } catch (e) {
+      console.warn('[ErgoGotchi Vision] MediaPipe unavailable, using fallback signals:', e);
+      return false;
+    }
+  }
+
+  private async loadMediaPipe(): Promise<boolean> {
+    {
       // Dynamic import to support modern CDN / npm bundle
       const vision = await import('@mediapipe/tasks-vision');
       const FilesetResolver = vision.FilesetResolver;
@@ -77,7 +99,7 @@ export class VisionPipeline {
       const PoseLandmarker = vision.PoseLandmarker;
 
       const wasmFileset = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+        `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
       );
 
       this.faceLandmarker = await FaceLandmarker.createFromOptions(wasmFileset, {
@@ -102,9 +124,6 @@ export class VisionPipeline {
 
       console.log('[ErgoGotchi Vision] MediaPipe Tasks-Vision loaded successfully.');
       return true;
-    } catch (e) {
-      console.warn('[ErgoGotchi Vision] MediaPipe WebAssembly load notice:', e);
-      return false;
     }
   }
 
@@ -113,18 +132,26 @@ export class VisionPipeline {
     if (!this.videoElement) return false;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
-        audio: false,
+      const video = this.videoElement;
+      const open = navigator.mediaDevices
+        .getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false })
+        .then(async (stream) => {
+          video.srcObject = stream;
+          await video.play();
+          return stream;
+        });
+      // If the camera answers after we gave up, release it instead of leaking it
+      open.catch(() => {});
+      await withTimeout(open, CAMERA_TIMEOUT_MS, 'Camera start').catch((e) => {
+        open.then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => {});
+        throw e;
       });
-      this.videoElement.srcObject = stream;
-      await this.videoElement.play();
 
       this.isRunning = true;
       this.startFrameLoop();
       return true;
     } catch (err) {
-      console.warn('[ErgoGotchi Vision] Camera access error:', err);
+      console.warn('[ErgoGotchi Vision] Camera unavailable, using fallback signals:', (err as Error)?.name, (err as Error)?.message);
       // Fallback: run simulated / test vision loop if camera is unavailable in test runner
       this.isRunning = true;
       this.startFallbackLoop();
@@ -198,6 +225,9 @@ export class VisionPipeline {
     };
 
     this.isCalibrated = true;
+    // New blink threshold -> restart the blink-rate window
+    this.blinkTimestamps = [];
+    this.blinkTrackingStartedAt = Date.now();
     console.log('[ErgoGotchi Vision] Calibration baseline locked:', this.baseline);
     if (this.onCalibrationComplete) {
       this.onCalibrationComplete(this.baseline);
@@ -338,6 +368,17 @@ export class VisionPipeline {
     }
   }
 
+  /**
+   * Blinks per minute. The raw count only covers the last 60s, so right after start-up it reads ~0,
+   * which used to look like severe eye strain. Report a normal rate for the first 20s, then extrapolate.
+   */
+  private currentBlinkRate(): number {
+    const elapsedMs = Date.now() - this.blinkTrackingStartedAt;
+    if (elapsedMs >= 60000) return this.blinkTimestamps.length;
+    if (elapsedMs < 20000) return 15;
+    return Math.round((this.blinkTimestamps.length * 60000) / elapsedMs);
+  }
+
   /** Compute normalized signals relative to calibrated baseline */
   private computeSignals(
     w: number,
@@ -375,7 +416,7 @@ export class VisionPipeline {
       head_pitch_deg: headPitch,
       lean_in: leanIn,
       shoulder_tilt_deg: tilt,
-      blink_rate_1m: this.blinkTimestamps.length,
+      blink_rate_1m: this.currentBlinkRate(),
       head_yaw_deg: y,
     };
 

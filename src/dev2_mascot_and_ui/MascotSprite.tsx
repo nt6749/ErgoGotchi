@@ -6,6 +6,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PetState, StretchCue } from '../types';
 import { soundEffects } from './soundEffects';
+import { PET_WALKS, PetEmote, renderPixelMascot, USE_PIXEL_MASCOT } from './PixelMascot';
+
+/**
+ * The Electron pet window ignores the mouse (clicks fall through to the desktop) except while
+ * the pointer is over the pet or its speech bubble.
+ */
+const electronAPI: any = (window as any).electronAPI;
+const captureMouse = {
+  onMouseEnter: () => electronAPI?.setIgnoreMouse?.(false),
+  onMouseLeave: () => electronAPI?.setIgnoreMouse?.(true),
+};
 
 interface MascotSpriteProps {
   state: PetState;
@@ -13,6 +24,7 @@ interface MascotSpriteProps {
   isReviving: boolean;
   speechText: string | null;
   speechCue: StretchCue | null;
+  emote?: PetEmote | null;
   onDismissSpeech: () => void;
   onOpenDashboard: () => void;
   onRecalibrate: () => void;
@@ -24,6 +36,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
   isReviving,
   speechText,
   speechCue,
+  emote = null,
   onDismissSpeech,
   onOpenDashboard,
   onRecalibrate,
@@ -78,6 +91,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
   // Soft walking wandering along taskbar when Thriving/Neutral
   useEffect(() => {
+    if (!PET_WALKS) return;
     if (state === 'SLOUCHING' || state === 'WILTED' || state === 'CALIBRATING' || state === 'AWAY') {
       return;
     }
@@ -116,7 +130,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     >
       {/* Dynamic Comic Speech Bubble */}
       {speechText && (
-        <div className="animate-bounce-in mb-3 w-48 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border-2 border-emerald-400/80 backdrop-blur-md relative z-50">
+        <div {...captureMouse} className="animate-bounce-in mb-3 w-48 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border-2 border-emerald-400/80 backdrop-blur-md relative z-50">
           <button
             onClick={onDismissSpeech}
             className="absolute -top-2 -right-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full w-5 h-5 flex items-center justify-center text-xs border border-slate-600 shadow"
@@ -155,9 +169,12 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
       {/* Mascot Sprite Container */}
       <div
+        {...captureMouse}
         onClick={handlePet}
         onDoubleClick={onOpenDashboard}
         onContextMenu={(e) => {
+          // In Electron, let the native right-click menu open instead
+          if ((window as any).electronAPI?.isElectron) return;
           e.preventDefault();
           onRecalibrate();
         }}
@@ -170,7 +187,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
         }}
       >
         {/* Render State Specific SVG Graphic */}
-        {renderMascotGraphic(state, hp)}
+        {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote) : renderMascotGraphic(state, hp)}
       </div>
 
       {/* Micro Health Bar under Mascot */}
