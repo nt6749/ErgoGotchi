@@ -689,6 +689,9 @@ export const App: React.FC = () => {
           onToggleTheme={toggleTheme}
           difficulty={difficulty}
           onSetDifficulty={handleSetDifficulty}
+          isPresent={isPresent}
+          isCalibrating={isCalibrating}
+          calibrationProgress={calibrationProgress}
         />
       </div>
     );

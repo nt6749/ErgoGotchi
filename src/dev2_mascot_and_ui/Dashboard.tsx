@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { DifficultyLevel, PetState } from '../types';
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
 import { MyDuck } from './MyDuck';
+import { CameraScreen } from './CameraScreen';
 import type { ForcedActivity } from './PixelMascot';
 import {
   ADULT_LEVEL,
@@ -97,6 +98,11 @@ interface DashboardProps {
   // Difficulty setting
   difficulty?: DifficultyLevel;
   onSetDifficulty?: (level: DifficultyLevel) => void;
+
+  // Biometrics & camera diagnostics
+  isPresent?: boolean;
+  isCalibrating?: boolean;
+  calibrationProgress?: number;
 }
 
 type TabId = 'analytics' | 'myduck' | 'quests' | 'tigerdata' | 'demo' | 'settings';
@@ -165,6 +171,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onToggleTheme,
   difficulty,
   onSetDifficulty,
+  isPresent = true,
+  isCalibrating = false,
+  calibrationProgress = 0,
 }) => {
   const [localDifficulty, setLocalDifficulty] = useState<DifficultyLevel>(() => {
     try {
@@ -487,121 +496,144 @@ GROUP BY bucket, session_id;`}</pre>
             </>
           )}
 
-          {/* Demo controls */}
+          {/* Demo controls & Camera diagnostics */}
           {activeTab === 'demo' && (
             <>
               <div className={`${CALLOUT} px-5 py-4`}>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-1.5">🎬 Demo controls</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-1.5">🎬 Demo & Camera Diagnostics</h3>
                 <p className={`text-sm leading-relaxed ${MUTED}`}>
-                  Drive the duck by hand during a demo, e.g. when venue lighting confuses the webcam. Everything here
-                  acts on the duck on your desktop straight away. The key in brackets does the same thing while this
-                  window is focused.
+                  Test your camera live and watch real-time biometric tracking, or drive the duck manually with keyboard hotkeys for live presentations.
                 </p>
               </div>
 
-              <div className={`${CARD} p-5 space-y-5`}>
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>Posture state</h4>
-                  <ChoiceRow<PetState | null>
-                    current={forcedState}
-                    onPick={onForceState}
-                    choices={[
-                      { value: null, label: 'Follow camera [4]' },
-                      { value: 'THRIVING', label: 'Thriving [1]' },
-                      { value: 'NEUTRAL', label: 'Neutral' },
-                      { value: 'SLOUCHING', label: 'Slouching [2]' },
-                      { value: 'WILTED', label: 'Wilted [3]' },
-                      { value: 'AWAY', label: 'Away' },
-                    ]}
-                  />
-                  <button onClick={onShowWarning} className={`${BUTTON_OUTLINE} mt-2`}>
-                    Show posture warning [5]
-                  </button>
-                </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                {/* Column 1: Live Camera Screen Viewfinder */}
+                <CameraScreen
+                  cameras={cameras}
+                  activeCameraId={activeCameraId}
+                  onSelectCamera={onSelectCamera}
+                  onRecalibrate={onRecalibrate}
+                  strainIndex={strainIndex}
+                  blinkRate={blinkRate}
+                  worstSignal={worstSignal}
+                  state={state}
+                  isPresent={isPresent}
+                  isCalibrating={isCalibrating}
+                  calibrationProgress={calibrationProgress}
+                />
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>Activity</h4>
-                  <ChoiceRow<ForcedActivity>
-                    current={forcedActivity}
-                    onPick={onForceActivity}
-                    choices={[
-                      { value: 'AUTO', label: 'Follow my apps [9]' },
-                      { value: 'WATCHING', label: 'Watching TV [6]' },
-                      { value: 'MUSIC', label: 'Music [7]' },
-                      { value: 'WORKING', label: 'Working [8]' },
-                      { value: 'NONE', label: 'Nothing' },
-                    ]}
-                  />
-                </div>
+                {/* Column 2: Presenter Manual Overrides */}
+                <div className={`${CARD} p-5 space-y-5`}>
+                  <div className="flex items-center justify-between pb-2 border-b border-[var(--line)]">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)]">
+                      🎮 Manual Presenter Overrides
+                    </h4>
+                    <span className={`text-[11px] ${MUTED}`}>Hotkeys in brackets</span>
+                  </div>
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>
-                    Age <span className="normal-case font-normal">· now level {pet.level}, {STAGE_TITLES[stage]}</span>
-                  </h4>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, 1))}
-                      className={stage === 'EGG' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
-                    >
-                      Egg
-                    </button>
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, HATCH_LEVEL))}
-                      className={stage === 'BABY' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
-                    >
-                      Baby duck
-                    </button>
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, ADULT_LEVEL))}
-                      className={stage === 'ADULT' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
-                    >
-                      Grown duck
-                    </button>
-                    <button onClick={() => onPetChange((p) => setLevel(p, p.level + 1))} className={BUTTON_OUTLINE}>
-                      Level up +1 []]
-                    </button>
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, p.level - 1))}
-                      disabled={pet.level <= 1}
-                      className={BUTTON_OUTLINE}
-                    >
-                      Level down −1 [[]
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>Posture state</h4>
+                    <ChoiceRow<PetState | null>
+                      current={forcedState}
+                      onPick={onForceState}
+                      choices={[
+                        { value: null, label: 'Follow camera [4]' },
+                        { value: 'THRIVING', label: 'Thriving [1]' },
+                        { value: 'NEUTRAL', label: 'Neutral' },
+                        { value: 'SLOUCHING', label: 'Slouching [2]' },
+                        { value: 'WILTED', label: 'Wilted [3]' },
+                        { value: 'AWAY', label: 'Away' },
+                      ]}
+                    />
+                    <button onClick={onShowWarning} className={`${BUTTON_OUTLINE} mt-2`}>
+                      Show posture warning [5]
                     </button>
                   </div>
-                </div>
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>
-                    Corn <span className="normal-case font-normal">· {pet.corn} 🌽 in the pantry, next level costs {need}</span>
-                  </h4>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => onPetChange((p) => grantCorn(p, 10))} className={BUTTON_NEUTRAL}>
-                      +10 corn [X]
-                    </button>
-                    <button onClick={() => onPetChange((p) => grantCorn(p, 100))} className={BUTTON_PRIMARY}>
-                      +100 corn [Z]
-                    </button>
-                    <button onClick={onFeed} disabled={!enoughCorn} className={BUTTON_NEUTRAL}>
-                      Feed [F]
-                    </button>
-                    <button onClick={() => onPetChange((p) => ({ ...p, corn: 0 }))} className={BUTTON_NEUTRAL}>
-                      Empty pantry
-                    </button>
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>Activity</h4>
+                    <ChoiceRow<ForcedActivity>
+                      current={forcedActivity}
+                      onPick={onForceActivity}
+                      choices={[
+                        { value: 'AUTO', label: 'Follow my apps [9]' },
+                        { value: 'WATCHING', label: 'Watching TV [6]' },
+                        { value: 'MUSIC', label: 'Music [7]' },
+                        { value: 'WORKING', label: 'Working [8]' },
+                        { value: 'NONE', label: 'Nothing' },
+                      ]}
+                    />
                   </div>
-                </div>
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>Session</h4>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={onToggleDemoMode} aria-pressed={isDemoMode} className={isDemoMode ? BUTTON_SELECTED : BUTTON_NEUTRAL}>
-                      ⚡ Demo mode: {isDemoMode ? 'on' : 'off'} [D]
-                    </button>
-                    <button onClick={onRecalibrate} className={BUTTON_NEUTRAL}>
-                      Calibrate [C]
-                    </button>
-                    <button onClick={() => onPetChange(startOver)} className={BUTTON_NEUTRAL}>
-                      Start over as an egg [E]
-                    </button>
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>
+                      Age <span className="normal-case font-normal">· now level {pet.level}, {STAGE_TITLES[stage]}</span>
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, 1))}
+                        className={stage === 'EGG' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                      >
+                        Egg
+                      </button>
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, HATCH_LEVEL))}
+                        className={stage === 'BABY' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                      >
+                        Baby duck
+                      </button>
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, ADULT_LEVEL))}
+                        className={stage === 'ADULT' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                      >
+                        Grown duck
+                      </button>
+                      <button onClick={() => onPetChange((p) => setLevel(p, p.level + 1))} className={BUTTON_OUTLINE}>
+                        Level up +1 []]
+                      </button>
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, p.level - 1))}
+                        disabled={pet.level <= 1}
+                        className={BUTTON_OUTLINE}
+                      >
+                        Level down −1 [[]
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>
+                      Corn <span className="normal-case font-normal">· {pet.corn} 🌽 in the pantry, next level costs {need}</span>
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => onPetChange((p) => grantCorn(p, 10))} className={BUTTON_NEUTRAL}>
+                        +10 corn [X]
+                      </button>
+                      <button onClick={() => onPetChange((p) => grantCorn(p, 100))} className={BUTTON_PRIMARY}>
+                        +100 corn [Z]
+                      </button>
+                      <button onClick={onFeed} disabled={!enoughCorn} className={BUTTON_NEUTRAL}>
+                        Feed [F]
+                      </button>
+                      <button onClick={() => onPetChange((p) => ({ ...p, corn: 0 }))} className={BUTTON_NEUTRAL}>
+                        Empty pantry
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>Session</h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={onToggleDemoMode} aria-pressed={isDemoMode} className={isDemoMode ? BUTTON_SELECTED : BUTTON_NEUTRAL}>
+                        ⚡ Demo mode: {isDemoMode ? 'on' : 'off'} [D]
+                      </button>
+                      <button onClick={onRecalibrate} className={BUTTON_NEUTRAL}>
+                        Calibrate [C]
+                      </button>
+                      <button onClick={() => onPetChange(startOver)} className={BUTTON_NEUTRAL}>
+                        Start over as an egg [E]
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
