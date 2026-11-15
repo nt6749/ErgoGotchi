@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   BiometricSignals, 
   PetState, 
+  DifficultyLevel,
   ScoringParams, 
   ScoringState, 
   StretchCue 
@@ -14,6 +15,7 @@ import {
 import { 
   createInitialState, 
   DEMO_PARAMS, 
+  DIFFICULTY_PRESETS,
   NORMAL_PARAMS, 
   step 
 } from './dev1_sensing_and_scoring/scoring';
@@ -76,6 +78,7 @@ interface ElectronAPI {
   onResetGrowth: (cb: () => void) => void;
   onOpenWizard?: (cb: () => void) => void;
   setWizardActive?: (active: boolean) => void;
+  onSetDifficulty?: (cb: (level: DifficultyLevel) => void) => void;
   centerPet?: (width?: number, height?: number) => void;
   dockPet?: () => void;
 }
@@ -124,6 +127,23 @@ export const App: React.FC = () => {
   // Application view state
   const [showDashboard, setShowDashboard] = useState(isDashboardView);
   const [isDemoMode, setIsDemoMode] = useState(true); // Default to Demo mode for sunhacks judging!
+  const [difficulty, setDifficulty] = useState<DifficultyLevel>(() => {
+    try {
+      const saved = localStorage.getItem('ergogotchi.difficulty');
+      if (saved === 'strict' || saved === 'normal' || saved === 'forgiving') return saved;
+    } catch {}
+    return 'normal';
+  });
+  const difficultyRef = useRef(difficulty);
+  difficultyRef.current = difficulty;
+
+  const handleSetDifficulty = (level: DifficultyLevel) => {
+    setDifficulty(level);
+    try {
+      localStorage.setItem('ergogotchi.difficulty', level);
+    } catch {}
+  };
+
   const [forcedState, setForcedState] = useState<PetState | null>(null);
   const [showWizard, setShowWizard] = useState<boolean>(() => {
     try {
@@ -328,7 +348,9 @@ export const App: React.FC = () => {
   // 2. 1-Hz Scoring & Telemetry Dispatch Loop
   useEffect(() => {
     const loopInterval = setInterval(() => {
-      const params: ScoringParams = isDemoModeRef.current ? DEMO_PARAMS : NORMAL_PARAMS;
+      const params: ScoringParams = isDemoModeRef.current 
+        ? DEMO_PARAMS 
+        : (DIFFICULTY_PRESETS[difficultyRef.current] || NORMAL_PARAMS);
       const prev = scoringStateRef.current;
       const currentSignals = currentSignalsRef.current;
       const isPresent = isPresentRef.current;
@@ -515,6 +537,15 @@ export const App: React.FC = () => {
     electronAPI.onForceState((s) => forceState(s));
     electronAPI.onToggleDemoMode(() => toggleDemoMode());
     electronAPI.onOpenWizard?.(() => setShowWizard(true));
+    electronAPI.onSetDifficulty?.((level) => handleSetDifficulty(level));
+    const onDiffEvent = () => {
+      try {
+        const saved = localStorage.getItem('ergogotchi.difficulty');
+        if (saved === 'strict' || saved === 'normal' || saved === 'forgiving') setDifficulty(saved);
+      } catch {}
+    };
+    window.addEventListener('ergogotchi-difficulty-changed', onDiffEvent);
+    return () => window.removeEventListener('ergogotchi-difficulty-changed', onDiffEvent);
   }, []);
 
   // 5. Growth and activity: follow the Electron shell and the other window
@@ -656,6 +687,8 @@ export const App: React.FC = () => {
           onEventsChange={changeEvents}
           theme={theme}
           onToggleTheme={toggleTheme}
+          difficulty={difficulty}
+          onSetDifficulty={handleSetDifficulty}
         />
       </div>
     );

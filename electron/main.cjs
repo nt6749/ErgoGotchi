@@ -15,6 +15,7 @@ let petWindow = null;
 let dashboardWindow = null;
 let backendProcess = null;
 let isWizardActive = false;
+let currentDifficulty = 'normal';
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
@@ -164,6 +165,38 @@ function createPetWindow() {
       {
         label: '⚡ Toggle Demo Mode (D)',
         click: () => petWindow.webContents.send('menu-toggle-demo'),
+      },
+      {
+        label: '🎚️ Difficulty',
+        submenu: [
+          {
+            label: 'Strict (0.5s reaction)',
+            type: 'radio',
+            checked: currentDifficulty === 'strict',
+            click: () => {
+              currentDifficulty = 'strict';
+              petWindow.webContents.send('menu-set-difficulty', 'strict');
+            },
+          },
+          {
+            label: 'Normal (1.5s reaction)',
+            type: 'radio',
+            checked: currentDifficulty === 'normal',
+            click: () => {
+              currentDifficulty = 'normal';
+              petWindow.webContents.send('menu-set-difficulty', 'normal');
+            },
+          },
+          {
+            label: 'Forgiving (3.0s reaction)',
+            type: 'radio',
+            checked: currentDifficulty === 'forgiving',
+            click: () => {
+              currentDifficulty = 'forgiving';
+              petWindow.webContents.send('menu-set-difficulty', 'forgiving');
+            },
+          },
+        ],
       },
       {
         label: '📷 Camera',

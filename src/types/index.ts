@@ -28,6 +28,8 @@ export type StretchCue =
 export type Severity = 'NUDGE' | 'WARNING';
 export type InterventionSource = 'gemini' | 'cache' | 'canned';
 
+export type DifficultyLevel = 'strict' | 'normal' | 'forgiving';
+
 /** Raw biometric posture signals relative to baseline */
 export interface BiometricSignals {
   forward_head: number;      // (F/W) / (F0/W0) - 1
@@ -36,7 +38,7 @@ export interface BiometricSignals {
   lean_in: number;           // W/W0 - 1
   shoulder_tilt_deg: number; // |T - T0|
   blink_rate_1m: number;     // Blinks in trailing 60s
-  head_yaw_deg: number;      // Guard: Yaw > 15 deg
+  head_yaw_deg: number;      // Guard: Yaw > 20 deg (multi-monitor guard)
 }
 
 /** Calibrated zero-point baseline from 5-second upright stance */
@@ -70,7 +72,8 @@ export interface ScoringState {
   slouchDwellAccumulator: number; // Dwell time at high strain
   sustainedSlouchTimer: number;   // Accumulated time for speech trigger
   speechCooldownTimer: number;    // Remaining cooldown
-  lowBlinkTimer: number;          // Accumulated low-blink duration
+  lowBlinkTimer: number;          // Accumulated low-blink duration for speech nudge
+  lowBlinkAccumulator?: number;   // Continuous seconds under 7 blinks/min for exponential HP drain
   lastPresentAt: number;          // Timestamp of last detected face
   triggerIntervention: boolean;   // Flag to emit intervention request
   interventionReason?: TriggerReason;
