@@ -7,7 +7,7 @@ const { compareVersions, getAppVersion } = require('../../electron/updater.cjs')
 describe('Auto-Updater semver comparison', () => {
   it('returns package.json version rather than electron binary version', () => {
     const version = getAppVersion();
-    expect(version).toBe('1.0.2');
+    expect(version).toBe('1.0.3');
     expect(version.startsWith('33.')).toBe(false);
   });
 
