@@ -8,7 +8,8 @@ import { PetState, StretchCue } from '../types';
 import { soundEffects } from './soundEffects';
 import { Activity, DEFAULT_LOOK, PET_WALKS, PetEmote, renderPixelMascot, USE_PIXEL_MASCOT } from './PixelMascot';
 import { HATCH_MS } from './lifeStageSprites';
-import { ADULT_LEVEL, canFeed, cornNeeded, NEW_PET, stageOf, type LifeStage, type PetProfile } from './progression';
+import { ADULT_LEVEL, canFeed, cornNeeded, NEW_PET, stageOf, STAGE_TITLES, type LifeStage, type PetProfile } from './progression';
+import { DEFAULT_SKIN, EGG_SHELL_SKINS, type EggShellSkin } from './eggShellSkins';
 
 /** Shown when no pet profile is passed in: a plain grown duck. */
 const GROWN_UP: PetProfile = { ...NEW_PET, level: ADULT_LEVEL };
@@ -21,20 +22,14 @@ const FEED_CORN_FROM = [
   [-46, -40], [0, -56], [46, -40], [-30, -62], [30, -62],
 ];
 
-/** Floating hearts & sparkles burst when the pet is fed or cheered. */
-const HEART_BURST_OFFSETS = [
-  { dx: -28, dy: -46, rot: -18, char: '♡' },
-  { dx: 0, dy: -58, rot: 8, char: '✨' },
-  { dx: 28, dy: -44, rot: 20, char: '♡' },
-  { dx: -14, dy: -66, rot: -10, char: '✧' },
-  { dx: 16, dy: -62, rot: 14, char: '🌸' },
-];
-
 /**
  * The Electron pet window ignores the mouse (clicks fall through to the desktop) except while
  * the pointer is over the pet or its speech bubble.
  */
 const electronAPI: any = (window as any).electronAPI;
+/** Where the browser preview remembers how far the pet was dragged. */
+const WEB_OFFSET_KEY = 'ergogotchi_web_pet_offset';
+const SHOW_CORN_KEY = 'ergogotchi.alwaysShowCorn';
 const captureMouse = {
   onMouseEnter: () => electronAPI?.setIgnoreMouse?.(false),
   onMouseLeave: () => electronAPI?.setIgnoreMouse?.(true),
@@ -56,6 +51,14 @@ interface MascotSpriteProps {
   onDismissSpeech: () => void;
   onOpenDashboard: () => void;
   onRecalibrate: () => void;
+  /** Position lock mode: if false, user can drag the egg machine across screen */
+  isLocked?: boolean;
+  onToggleLock?: (locked: boolean) => void;
+  /** Calibration state to show inside the machine screen */
+  isCalibrating?: boolean;
+  calibrationProgress?: number;
+  /** Active egg shell skin */
+  skin?: EggShellSkin;
 }
 
 export const MascotSprite: React.FC<MascotSpriteProps> = ({
@@ -71,52 +74,83 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
   onDismissSpeech,
   onOpenDashboard,
   onRecalibrate,
+  isLocked = true,
+  onToggleLock,
+  isCalibrating = false,
+  calibrationProgress = 0,
+  skin = DEFAULT_SKIN,
 }) => {
+  const skinConfig = EGG_SHELL_SKINS[skin] || EGG_SHELL_SKINS[DEFAULT_SKIN];
+  const labelStyle = { color: skinConfig.labelColor, textShadow: skinConfig.labelShadow };
   const [isPetting, setIsPetting] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('ergogotchi.alwaysShowCorn') === 'true';
-    } catch {
-      return false;
-    }
-  });
-  const [webOffset, setWebOffset] = useState<{ x: number; y: number }>(() => {
-    try {
-      const saved = localStorage.getItem('ergogotchi_web_pet_offset');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return { x: 0, y: 0 };
-  });
-
-  const dragRef = useRef<{
-    isMouseDown: boolean;
-    startX: number;
-    startY: number;
-    lastX: number;
-    lastY: number;
-    hasDragged: boolean;
-  }>({
-    isMouseDown: false,
-    startX: 0,
-    startY: 0,
-    lastX: 0,
-    lastY: 0,
-    hasDragged: false,
-  });
-
-  const isHoveredRef = useRef(false);
-
+  // Hearts burst when petted
+  const [hearts, setHearts] = useState<Array<{ id: number; x: number; y: number; size: number; emoji: string; angle: number }>>([]);
   // Feeding feedback: a burst of corn flying in, or a "not enough" shake
   const [feedBurst, setFeedBurst] = useState<number | null>(null);
-  const [heartBurst, setHeartBurst] = useState<number | null>(null);
   const [refused, setRefused] = useState(false);
   const [typedText, setTypedText] = useState('');
   const [posX, setPosX] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
 
+  // Dragging support (when !isLocked)
+  const [isDragging, setIsDragging] = useState(false);
+  const [browserOffset, setBrowserOffset] = useState<{ x: number; y: number }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WEB_OFFSET_KEY) || 'null');
+      if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') return saved;
+    } catch {}
+    return { x: 0, y: 0 };
+  });
+  const browserOffsetRef = useRef(browserOffset);
+  browserOffsetRef.current = browserOffset;
+  // "Always show corn level" setting (dashboard / right-click menu); when off, corn shows on hover
+  const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SHOW_CORN_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef<{ mouseX: number; mouseY: number; winX: number; winY: number; elX: number; elY: number } | null>(null);
+
   const bubbleTimerRef = useRef<any>(null);
+
+  // "Dock to corner" puts the pet back where it started
+  useEffect(() => {
+    const handleReset = () => {
+      setBrowserOffset({ x: 0, y: 0 });
+      try {
+        localStorage.removeItem(WEB_OFFSET_KEY);
+      } catch {}
+    };
+    electronAPI?.onPetDocked?.(handleReset);
+    window.addEventListener('pet-docked', handleReset);
+    return () => window.removeEventListener('pet-docked', handleReset);
+  }, []);
+
+  // Follow the corn setting when it is changed in the dashboard or the right-click menu
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === SHOW_CORN_KEY) setAlwaysShowCorn(e.newValue === 'true');
+    };
+    const handleCustom = (e: any) => {
+      if (typeof e.detail === 'boolean') setAlwaysShowCorn(e.detail);
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('always-show-corn-changed', handleCustom);
+    electronAPI?.onAlwaysShowCornChanged?.((val: boolean) => {
+      setAlwaysShowCorn(val);
+      try {
+        localStorage.setItem(SHOW_CORN_KEY, String(val));
+      } catch {}
+    });
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('always-show-corn-changed', handleCustom);
+    };
+  }, []);
 
   // ---- Growth: level-up, hatching and corn feedback
   const profile = pet ?? GROWN_UP;
@@ -231,136 +265,6 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     };
   }, [speechText]);
 
-  // Reset web offset if the pet is docked to corner via menu or settings
-  useEffect(() => {
-    const handleReset = () => {
-      setWebOffset({ x: 0, y: 0 });
-      try {
-        localStorage.removeItem('ergogotchi_web_pet_offset');
-      } catch (e) {}
-    };
-
-    if (electronAPI?.onPetDocked) {
-      electronAPI.onPetDocked(handleReset);
-    }
-    window.addEventListener('pet-docked', handleReset);
-    return () => {
-      window.removeEventListener('pet-docked', handleReset);
-    };
-  }, []);
-
-  // Listen for always-show-corn changes across tabs/windows or right-click menu
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'ergogotchi.alwaysShowCorn') {
-        setAlwaysShowCorn(e.newValue === 'true');
-      }
-    };
-    const handleCustom = (e: any) => {
-      if (typeof e.detail === 'boolean') {
-        setAlwaysShowCorn(e.detail);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    window.addEventListener('always-show-corn-changed', handleCustom);
-    if (electronAPI?.onAlwaysShowCornChanged) {
-      electronAPI.onAlwaysShowCornChanged((val: boolean) => {
-        setAlwaysShowCorn(val);
-        try {
-          localStorage.setItem('ergogotchi.alwaysShowCorn', String(val));
-        } catch {}
-      });
-    }
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('always-show-corn-changed', handleCustom);
-    };
-  }, []);
-
-  // Draggable Window & Pet Physics
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Only primary (left) button initiates drag
-    if (e.button !== 0) return;
-    dragRef.current = {
-      isMouseDown: true,
-      startX: e.screenX,
-      startY: e.screenY,
-      lastX: e.screenX,
-      lastY: e.screenY,
-      hasDragged: false,
-    };
-    electronAPI?.setIgnoreMouse?.(false);
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!dragRef.current.isMouseDown) return;
-
-      const totalDist = Math.hypot(
-        e.screenX - dragRef.current.startX,
-        e.screenY - dragRef.current.startY
-      );
-
-      // Drag threshold: require at least 5px of intentional movement
-      if (!dragRef.current.hasDragged) {
-        if (totalDist > 5) {
-          dragRef.current.hasDragged = true;
-          setIsDragging(true);
-        } else {
-          return;
-        }
-      }
-
-      const dx = e.screenX - dragRef.current.lastX;
-      const dy = e.screenY - dragRef.current.lastY;
-      dragRef.current.lastX = e.screenX;
-      dragRef.current.lastY = e.screenY;
-
-      if (electronAPI?.isElectron && electronAPI?.movePetBy) {
-        electronAPI.movePetBy(dx, dy, false);
-      } else {
-        setWebOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-      }
-    };
-
-    const handleMouseUp = () => {
-      if (!dragRef.current.isMouseDown) return;
-      dragRef.current.isMouseDown = false;
-
-      if (dragRef.current.hasDragged) {
-        if (electronAPI?.isElectron && electronAPI?.movePetBy) {
-          electronAPI.movePetBy(0, 0, true);
-        } else {
-          try {
-            setWebOffset((curr) => {
-              localStorage.setItem('ergogotchi_web_pet_offset', JSON.stringify(curr));
-              return curr;
-            });
-          } catch (err) {}
-        }
-
-        setTimeout(() => {
-          dragRef.current.hasDragged = false;
-          setIsDragging(false);
-        }, 80);
-      } else {
-        setIsDragging(false);
-      }
-
-      if (!isHoveredRef.current) {
-        captureMouse.onMouseLeave();
-        setHovered(false);
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
-
   // Audio trigger on state changes
   useEffect(() => {
     if (isReviving) {
@@ -370,10 +274,9 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     }
   }, [state, isReviving]);
 
-  // Soft walking wandering along taskbar when Thriving/Neutral (paused during drag)
+  // Soft walking wandering along taskbar when Thriving/Neutral
   useEffect(() => {
     if (!PET_WALKS) return;
-    if (isDragging) return;
     if (state === 'SLOUCHING' || state === 'WILTED' || state === 'CALIBRATING' || state === 'AWAY') {
       return;
     }
@@ -388,22 +291,41 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     }, 100);
 
     return () => clearInterval(walkInterval);
-  }, [state, direction, isDragging]);
+  }, [state, direction]);
 
-  // Clicking feeds the pet: it eats the corn it needs to level up, or refuses if there isn't enough
-  const handleFeed = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (dragRef.current.hasDragged) return;
+  // Clicking the duck or Button A: Pets the duck! Hearts pop out and sweet chime plays.
+  const handlePet = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    soundEffects.playPet();
+    setIsPetting(true);
+    later(() => setIsPetting(false), 700);
+
+    const emojis = ['💖', '💕', '❤️', '✨', '🌸', '🥰'];
+    const newHearts = Array.from({ length: 6 }).map((_, i) => ({
+      id: Date.now() + i + Math.random(),
+      x: (Math.random() - 0.5) * 50,
+      y: -15 - Math.random() * 35,
+      size: 13 + Math.floor(Math.random() * 9),
+      emoji: emojis[Math.floor(Math.random() * emojis.length)],
+      angle: (Math.random() - 0.5) * 35,
+    }));
+    setHearts((prev) => [...prev, ...newHearts]);
+    later(() => {
+      setHearts((prev) => prev.filter((h) => !newHearts.some((nh) => nh.id === h.id)));
+    }, 1100);
+  };
+
+  // Feeding the pet: eaten corn spends corn to level up, or refuses if not enough
+  const handleFeed = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!onFeed) return;
     if (onFeed()) {
       const id = Date.now();
       setIsPetting(true);
       setFeedBurst(id);
-      setHeartBurst(id);
       soundEffects.playEat();
       later(() => setIsPetting(false), 600);
       later(() => setFeedBurst((b) => (b === id ? null : b)), 700);
-      later(() => setHeartBurst((b) => (b === id ? null : b)), 950);
     } else {
       setRefused(true);
       soundEffects.playRefuse();
@@ -411,204 +333,465 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     }
   };
 
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (isLocked) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input')) return;
+
+    e.preventDefault();
+    setIsDragging(true);
+    isDraggingRef.current = true;
+    electronAPI?.setIgnoreMouse?.(false);
+
+    let lastX = e.screenX;
+    let lastY = e.screenY;
+
+    const onPointerMove = (moveEv: PointerEvent) => {
+      const dx = moveEv.screenX - lastX;
+      const dy = moveEv.screenY - lastY;
+      lastX = moveEv.screenX;
+      lastY = moveEv.screenY;
+
+      if (dx === 0 && dy === 0) return;
+
+      if (electronAPI?.isElectron && electronAPI.movePetBy) {
+        electronAPI.movePetBy(dx, dy, false);
+      } else {
+        setBrowserOffset((prev) => ({
+          x: prev.x + dx,
+          y: prev.y + dy,
+        }));
+      }
+    };
+
+    const onPointerUp = () => {
+      setIsDragging(false);
+      isDraggingRef.current = false;
+      // Remember where the pet was dropped, so it is there again next launch
+      if (electronAPI?.isElectron && electronAPI.movePetBy) {
+        electronAPI.movePetBy(0, 0, true);
+      } else {
+        try {
+          localStorage.setItem(WEB_OFFSET_KEY, JSON.stringify(browserOffsetRef.current));
+        } catch {}
+      }
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+  };
+
+  const captureMouseHandlers = {
+    onMouseEnter: () => {
+      electronAPI?.setIgnoreMouse?.(false);
+      setHovered(true);
+    },
+    onMouseLeave: () => {
+      setHovered(false);
+      if (!isDraggingRef.current) {
+        electronAPI?.setIgnoreMouse?.(true);
+      }
+    },
+  };
+
   return (
     <div 
       className="relative flex flex-col items-center justify-end select-none"
       style={{
-        width: '180px',
-        minHeight: speechText ? '260px' : '170px',
-        transform: electronAPI?.isElectron ? undefined : `translate(${webOffset.x}px, ${webOffset.y}px)`,
-        transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+        width: '260px',
+        minHeight: speechText ? '390px' : '310px',
+        transform: electronAPI?.isElectron ? undefined : `translate(${browserOffset.x}px, ${browserOffset.y}px)`,
       }}
     >
-      {/* Dynamic Comic Speech Bubble with Aesthetic Sanrio-Pop styling */}
+      {/* Dynamic Comic Speech Bubble (Positioned outside & above the egg machine) */}
       {speechText && (
-        <div {...captureMouse} className="animate-pop-spring mb-3 w-52 bg-white/98 text-neutral-900 p-3.5 rounded-3xl border-2 border-pink-300 shadow-[0_8px_20px_-4px_rgba(244,114,182,0.35)] relative z-50 backdrop-blur-sm">
+        <div
+          {...captureMouseHandlers}
+          className="animate-bounce-in mb-3 w-56 bg-white text-black p-3 rounded-2xl border-2 border-black shadow-[4px_4px_0_0_#000] relative z-50 text-left"
+          style={{ WebkitAppRegion: 'no-drag' } as any}
+        >
           <button
             onClick={onDismissSpeech}
-            className="absolute -top-2 -right-2 bg-pink-400 hover:bg-pink-500 hover:rotate-90 text-white font-black rounded-full w-5 h-5 flex items-center justify-center text-xs border-2 border-white shadow transition-all duration-200"
+            className="absolute -top-2 -right-2 bg-yellow-400 hover:bg-yellow-300 text-black font-black rounded-full w-5 h-5 flex items-center justify-center text-xs border-2 border-black cursor-pointer shadow-sm"
             title="Dismiss"
           >
             ×
           </button>
           
           {speechCue && speechCue !== 'NONE' && (
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-gradient-to-r from-pink-400 to-rose-400 text-white shadow-sm flex items-center gap-1">
-                <span>🎀</span>
-                <span>{speechCue.replace('_', ' ')}</span>
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-yellow-400 text-black border border-black uppercase tracking-wider">
+                {speechCue.replace('_', ' ')}
               </span>
             </div>
           )}
 
-          <p className="text-xs font-semibold leading-relaxed text-neutral-800">
+          <p className="text-[11px] font-bold leading-snug text-black">
             {typedText}
           </p>
 
           {/* Bubble tail arrow */}
-          <div className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-t-[9px] border-t-pink-300" />
-          <div className="absolute -bottom-[7px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[7px] border-t-white" />
+          <div className="absolute -bottom-[8px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-black" />
         </div>
       )}
 
-      {/* Mascot Sprite Container */}
-      <div
-        onMouseEnter={() => {
-          isHoveredRef.current = true;
-          captureMouse.onMouseEnter();
-          setHovered(true);
-        }}
-        onMouseLeave={() => {
-          isHoveredRef.current = false;
-          if (!isDragging && !dragRef.current.isMouseDown) {
-            captureMouse.onMouseLeave();
-            setHovered(false);
-          }
-        }}
-        onMouseDown={handleMouseDown}
-        onClick={handleFeed}
-        onDoubleClick={(e) => {
-          if (dragRef.current.hasDragged) return;
-          onOpenDashboard();
-        }}
-        onContextMenu={(e) => {
-          // In Electron, let the native right-click menu open instead
-          if ((window as any).electronAPI?.isElectron) return;
-          e.preventDefault();
-          onRecalibrate();
-        }}
-        title="Drag anywhere to move · Click to feed · Double-click for Dashboard"
-        className={`transition-transform duration-150 relative select-none ${
-          isDragging ? 'cursor-grabbing scale-105 drop-shadow-xl' : 'cursor-grab hover:scale-105'
-        } ${isReviving ? 'animate-backflip' : ''} ${isPetting ? 'animate-jelly' : ''} ${
-          flashing ? 'animate-level-flash' : ''
-        } ${refused ? 'animate-knife-shake' : ''}`}
-        style={{
-          transform: `translateX(${posX}px)`,
-        }}
-      >
-        {/* Cute Poppy Draggable Indicator Hint when hovered */}
-        {hovered && !isDragging && !banner && (
-          <div
-            className={`absolute ${(alwaysShowCorn || hovered) && pet ? '-top-16' : '-top-7'} left-1/2 -translate-x-1/2 pointer-events-none z-50 flex justify-center`}
-          >
-            <div className="animate-pop-spring whitespace-nowrap px-2.5 py-0.5 rounded-full bg-pink-500/90 text-white text-[10px] font-bold tracking-wide border border-pink-300 shadow-md flex items-center gap-1.5 opacity-95">
-              <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
-              <span>drag me anywhere</span>
-              <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
-            </div>
-          </div>
-        )}
-
-        {/* Render State Specific SVG Graphic */}
-        <div style={{ transform: `scaleX(${direction})` }} className="transition-transform duration-150">
-          {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote, look) : renderMascotGraphic(state, hp)}
-        </div>
-
-        {/* Level-up sparks and banner, and floating XP numbers (never block the mouse) */}
-        {banner && (
-          <div key={banner.id} className="absolute inset-0 pointer-events-none z-40">
-            {SPARK_DIRECTIONS.map(([dx, dy], i) => (
-              <span
-                key={i}
-                className="absolute left-1/2 top-1/2 text-amber-300 text-sm animate-level-spark"
-                style={{ ['--dx' as any]: `${dx}px`, ['--dy' as any]: `${dy}px` }}
-              >
-                ✦
-              </span>
-            ))}
-            <div className="absolute -top-7 left-1/2 -translate-x-1/2">
-              <div className="animate-level-banner whitespace-nowrap px-3 py-1 rounded-full bg-gradient-to-r from-pink-400 to-rose-400 text-white text-[11px] font-black uppercase tracking-wide border-2 border-white shadow-md">
-                {banner.text}
-              </div>
-            </div>
-          </div>
-        )}
-        {cornPops.map((pop) => (
-          <div key={pop.id} className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex justify-center">
-            <span className="text-[11px] font-black text-white animate-xp-float whitespace-nowrap px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 border border-white shadow-sm flex items-center justify-center gap-1">
-              +{pop.amount} 🌽
+      {/* Sparks and level banner (Outside the egg shell) */}
+      {banner && (
+        <div key={banner.id} className="absolute top-10 left-1/2 -translate-x-1/2 pointer-events-none z-50 flex flex-col items-center">
+          {SPARK_DIRECTIONS.map(([dx, dy], i) => (
+            <span
+              key={i}
+              className="absolute left-1/2 top-1/2 text-amber-400 text-base animate-level-spark"
+              style={{ ['--dx' as any]: `${dx * 1.5}px`, ['--dy' as any]: `${dy * 1.5}px` }}
+            >
+              ✦
             </span>
+          ))}
+          <div className="animate-level-banner whitespace-nowrap px-3 py-1 rounded-full bg-yellow-400 text-black text-xs font-black uppercase tracking-wide border-2 border-black shadow-[3px_3px_0_0_#000]">
+            {banner.text}
           </div>
-        ))}
+        </div>
+      )}
 
-        {/* Fed: corn flies into the pet */}
-        {feedBurst !== null && (
-          <div key={feedBurst} className="absolute inset-0 pointer-events-none z-30">
-            {FEED_CORN_FROM.map(([dx, dy], i) => (
-              <span
-                key={i}
-                className="absolute left-1/2 top-1/2 text-sm animate-corn-fly"
-                style={{ ['--dx' as any]: `${dx}px`, ['--dy' as any]: `${dy}px`, animationDelay: `${i * 60}ms` }}
-              >
-                🌽
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Floating Heart / Sparkle Burst on Love & Feeding */}
-        {heartBurst !== null && (
-          <div key={heartBurst} className="absolute inset-0 pointer-events-none z-40">
-            {HEART_BURST_OFFSETS.map((h, i) => (
-              <span
-                key={i}
-                className="absolute left-1/2 top-1/2 text-pink-500 font-bold text-sm animate-heart-burst"
-                style={{
-                  ['--hx' as any]: `${h.dx}px`,
-                  ['--hy' as any]: `${h.dy}px`,
-                  ['--hrot' as any]: `${h.rot}deg`,
-                  animationDelay: `${i * 70}ms`,
-                }}
-              >
-                {h.char}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Corn status card: always shown if enabled (default), or shown on hover */}
-        {pet && (alwaysShowCorn || hovered) && !banner && (
-          <div className="absolute -top-11 left-1/2 -translate-x-1/2 pointer-events-none z-40 flex justify-center">
-            <div className="animate-pop-spring whitespace-nowrap text-center px-3 py-1 rounded-2xl bg-white/95 backdrop-blur-sm border-2 border-pink-300 shadow-[0_4px_12px_rgba(244,114,182,0.25)] transition-all duration-200">
-              <div className={`text-[12px] font-black leading-tight flex items-center justify-center gap-1.5 ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
-                <span>🌽</span>
-                <span>{profile.corn}/{need}</span>
-                {enoughCorn && <span className="text-[10px] bg-pink-100 text-pink-700 px-1.5 py-0.2 rounded-full border border-pink-200 font-bold">FEED!</span>}
-              </div>
-              <div className="text-[9px] font-bold text-neutral-500 leading-tight text-center">
-                {enoughCorn ? `Click to feed ${profile.name} ✨` : `${need - profile.corn} more to level up`}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Micro Health Bar under Mascot with smooth pastel gradient */}
-      <div className="w-24 bg-white/90 rounded-full h-2 mt-2 border-2 border-pink-200 shadow-sm overflow-hidden p-0.5">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${
-            hp >= 80 ? 'bg-gradient-to-r from-emerald-400 to-teal-400' : hp >= 40 ? 'bg-gradient-to-r from-amber-400 to-yellow-400' : 'bg-gradient-to-r from-rose-400 to-pink-500'
-          }`}
-          style={{ width: `${Math.max(4, hp)}%` }}
-        />
-      </div>
-
-      {/* Level, corn progress towards the next level, and the pantry */}
-      {pet && (
-        <div className="flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-full bg-white/95 border-2 border-pink-200 shadow-sm text-neutral-800">
-          <span className="text-[9px] font-black leading-none text-pink-600">Lv {profile.level}</span>
-          <div className="w-12 bg-pink-100 rounded-full h-1.5 border border-pink-200 overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${enoughCorn ? 'bg-gradient-to-r from-pink-400 to-rose-500' : 'bg-gradient-to-r from-yellow-400 to-amber-400'}`}
-              style={{ width: `${Math.max(3, Math.min(1, profile.corn / need) * 100)}%` }}
-            />
-          </div>
-          <span className={`text-[9px] font-black leading-none ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
-            🌽{profile.corn}
+      {/* Floating Corn Pops: Popping OUT of the egg machine, cleanly centered */}
+      {cornPops.map((pop) => (
+        <div key={pop.id} className="absolute top-12 left-1/2 -translate-x-1/2 pointer-events-none z-50 flex justify-center">
+          <span className="text-xs font-black text-white animate-xp-float whitespace-nowrap px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 border-2 border-black shadow-[2px_2px_0_0_#000]">
+            +{pop.amount} 🌽
           </span>
         </div>
+      ))}
+
+      {/* Cute Poppy Draggable Indicator Hint when hovered and unlocked */}
+      {hovered && !isLocked && !isDragging && !banner && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none z-50 flex justify-center">
+          <div className="animate-pop-spring whitespace-nowrap px-2.5 py-0.5 rounded-full bg-pink-500/95 text-white text-[10px] font-bold tracking-wide border border-pink-300 shadow-md flex items-center gap-1.5 opacity-95">
+            <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
+            <span>drag me anywhere</span>
+            <span className="text-pink-200 text-xs animate-sparkle-spin">✧</span>
+          </div>
+        </div>
       )}
+
+      {/* Corn status badge card when enabled or hovered */}
+      {pet && (alwaysShowCorn || hovered) && !banner && (
+        <div className={`absolute ${hovered && !isLocked && !isDragging ? '-top-3' : 'top-6'} left-1/2 -translate-x-1/2 pointer-events-none z-40 flex justify-center`}>
+          <div className="animate-pop-spring whitespace-nowrap text-center px-3 py-1 rounded-2xl bg-white/95 backdrop-blur-sm border-2 border-pink-300 shadow-[0_4px_12px_rgba(244,114,182,0.25)] transition-all duration-200">
+            <div className={`text-[12px] font-black leading-tight flex items-center justify-center gap-1.5 ${enoughCorn ? 'text-pink-600' : 'text-neutral-700'}`}>
+              <span>🌽</span>
+              <span>{profile.corn}/{need}</span>
+              {enoughCorn && <span className="text-[10px] bg-pink-100 text-pink-700 px-1.5 py-0.2 rounded-full border border-pink-200 font-bold">FEED!</span>}
+            </div>
+            <div className="text-[9px] font-bold text-neutral-500 leading-tight text-center">
+              {enoughCorn ? `Click to feed ${profile.name} ✨` : `${need - profile.corn} more to level up`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Hearts: Bursting OUT of the egg machine into the air */}
+      {hearts.map((h) => (
+        <span
+          key={h.id}
+          className="absolute left-1/2 top-48 pointer-events-none z-50 select-none animate-heart-float"
+          style={{
+            '--hx': `${h.x * 1.8}px`,
+            '--hy': `${h.y * 2.2}px`,
+            '--hrot': `${h.angle}deg`,
+            fontSize: `${h.size + 6}px`,
+          } as any}
+        >
+          {h.emoji}
+        </span>
+      ))}
+
+      {/* Outer Layer: Egg Machine Shell based on Vintage Photos */}
+      <div
+        {...captureMouseHandlers}
+        onPointerDown={handlePointerDown}
+        className={`relative w-[236px] rounded-[50%_50%_44%_44%_/_58%_58%_42%_42%] p-3.5 border-4 ${skinConfig.shellBorder} shadow-[4px_6px_0_0_#000] flex flex-col items-center justify-between text-black transition-all overflow-hidden ${
+          isLocked ? '' : 'cursor-grab active:cursor-grabbing ring-2 ring-amber-400/80 ring-offset-2'
+        }`}
+        style={{
+          minHeight: '292px',
+          background: skinConfig.shellGradient,
+          WebkitAppRegion: 'no-drag',
+        } as any}
+      >
+        {/* Realistic Ball Chain Keychain at Top */}
+        <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none z-30">
+          <div className="flex flex-col items-center -space-y-0.5 mb-0.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-slate-100 via-slate-300 to-slate-500 border border-slate-700 shadow-[0_1px_1px_rgba(0,0,0,0.5)]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-slate-100 via-slate-300 to-slate-500 border border-slate-700 shadow-[0_1px_1px_rgba(0,0,0,0.5)]" />
+          </div>
+          <div className="w-5 h-3.5 rounded-t-full border-2 border-black/80 bg-white/50 backdrop-blur-sm flex items-center justify-center shadow-sm">
+            <div className="w-2 h-2 rounded-full border border-black/80 bg-neutral-900" />
+          </div>
+        </div>
+
+        {/* Specular Highlight / Gloss on Shell */}
+        <div className="absolute top-3 left-6 w-16 h-7 rounded-[50%] bg-white/30 rotate-[-28deg] pointer-events-none z-10" />
+
+        {/* --- Skin Specific Shell Background Decorations --- */}
+        {skin === 'cosmic' && (
+          <>
+            {/* Crescent Moon on Left */}
+            <div className="absolute top-14 left-2.5 pointer-events-none select-none text-yellow-300 drop-shadow-[0_0_5px_rgba(253,224,71,0.9)] opacity-90 z-0">
+              <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
+                <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.79c-.44-.06-.9-.1-1.36-.1z" />
+              </svg>
+            </div>
+            {/* Constellation Stars */}
+            <div className="absolute top-9 right-4 pointer-events-none select-none text-yellow-200 text-xs z-0">✦</div>
+            <div className="absolute top-16 right-2 pointer-events-none select-none text-yellow-300 text-sm z-0">★</div>
+            <div className="absolute bottom-20 left-3 pointer-events-none select-none text-yellow-200 text-xs z-0">✦</div>
+            <div className="absolute bottom-16 right-3 pointer-events-none select-none text-yellow-300 text-xs z-0">★</div>
+            <div className="absolute top-28 left-1 pointer-events-none select-none text-yellow-100 text-[10px] z-0">⋆</div>
+          </>
+        )}
+
+        {skin === 'pastel' && (
+          <div className="absolute inset-0 overflow-hidden rounded-[50%_50%_44%_44%_/_58%_58%_42%_42%] pointer-events-none opacity-50 z-0">
+            <div className="absolute -top-12 -left-12 w-52 h-52 rounded-full border-[14px] border-yellow-200/70" />
+            <div className="absolute -top-9 -left-9 w-52 h-52 rounded-full border-[12px] border-purple-300/60" />
+            <div className="absolute -top-6 -left-6 w-52 h-52 rounded-full border-[10px] border-sky-300/60" />
+            <div className="absolute bottom-14 -left-4 w-20 h-10 rounded-full bg-white/40 blur-[1px]" />
+            <div className="absolute top-12 -right-4 w-16 h-8 rounded-full bg-white/40 blur-[1px]" />
+          </div>
+        )}
+
+        {skin === 'avocado' && (
+          <>
+            {/* Floating Avocado Halves */}
+            <div className="absolute top-10 left-3 pointer-events-none select-none flex items-center justify-center z-0">
+              <div className="w-5 h-6 rounded-[50%_50%_45%_45%_/_60%_60%_40%_40%] bg-emerald-200 border border-emerald-700 flex items-center justify-center shadow-sm">
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-800" />
+              </div>
+            </div>
+            <div className="absolute top-12 right-3 pointer-events-none select-none flex items-center justify-center z-0">
+              <div className="w-5 h-6 rounded-[50%_50%_45%_45%_/_60%_60%_40%_40%] bg-emerald-200 border border-emerald-700 flex items-center justify-center shadow-sm">
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-800" />
+              </div>
+            </div>
+            {/* Gingham Checkered Bottom Banner */}
+            <div
+              className="absolute bottom-0 left-0 right-0 h-16 rounded-b-[42px] border-t-2 border-emerald-600/40 pointer-events-none opacity-40 z-0"
+              style={{
+                backgroundImage: `
+                  linear-gradient(45deg, rgba(255,255,255,0.7) 25%, transparent 25%), 
+                  linear-gradient(-45deg, rgba(255,255,255,0.7) 25%, transparent 25%), 
+                  linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.7) 75%), 
+                  linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.7) 75%)
+                `,
+                backgroundSize: '16px 16px',
+                backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+                backgroundColor: '#bbf7d0',
+              }}
+            />
+          </>
+        )}
+
+        {/* Iconic Arched ErGoGotCHi Logo */}
+        <div
+          className="w-full flex items-center justify-center pt-0.5 pb-0.5 z-10 select-none"
+          style={{ WebkitAppRegion: 'no-drag' } as any}
+        >
+          <span
+            className="text-[15px] font-black tracking-wide font-sans transform -rotate-1"
+            style={{
+              color: skinConfig.logoColor,
+              textShadow: skinConfig.logoShadow,
+            }}
+          >
+            ErGoGotCHi<span className="text-[8px] align-super">®</span>
+          </span>
+        </div>
+
+        {/* Authentic Starburst Bezel from Photos */}
+        <div
+          className="relative p-3 my-0.5 flex items-center justify-center z-10"
+          style={{
+            background: skinConfig.starBurstBg,
+            boxShadow: skinConfig.starBurstShadow,
+            clipPath: 'polygon(18% 0%, 50% 7%, 82% 0%, 93% 18%, 100% 50%, 93% 82%, 82% 100%, 50% 93%, 18% 100%, 7% 82%, 0% 50%, 7% 18%)',
+            WebkitAppRegion: 'no-drag',
+          } as any}
+        >
+          {/* LCD Screen Glass with 8 Classic Icons */}
+          <div
+            className="w-[172px] h-[130px] rounded-xl border-2 relative overflow-hidden flex flex-col items-center justify-between p-1 shadow-inner cursor-pointer"
+            style={{
+              background: skinConfig.lcdBg,
+              borderColor: skinConfig.lcdBorder,
+              color: skinConfig.lcdTextColor,
+            }}
+            onClick={handlePet}
+            onDoubleClick={onOpenDashboard}
+            onContextMenu={(e) => {
+              if ((window as any).electronAPI?.isElectron) return;
+              e.preventDefault();
+              onRecalibrate();
+            }}
+            title="Click Duck to Pet 💖 | Double-click for Dashboard"
+          >
+            {/* Top 4 Classic LCD Icons */}
+            <div className="flex items-center justify-between w-full px-2 pt-0.5 text-[9px] font-mono select-none opacity-70">
+              <span className={hovered ? 'scale-125 font-black text-amber-900' : ''} title="Food">🍴</span>
+              <span title="Light">💡</span>
+              <span title="Game">⚾</span>
+              <span className={state === 'SLOUCHING' || state === 'WILTED' ? 'scale-125 text-rose-800 font-black animate-pulse' : ''} title="Care">💉</span>
+            </div>
+
+            {/* Calibration Overlay inside Screen */}
+            {isCalibrating && (
+              <div className="absolute inset-0 bg-[#c7dfbd]/95 backdrop-blur-[1px] flex flex-col items-center justify-center p-2 z-30 text-center">
+                <p className="text-[10px] font-black text-[#1a2814] leading-tight">Sit tall… calibrating</p>
+                <div className="w-28 bg-neutral-300 border border-black rounded-full h-2 mt-1 overflow-hidden">
+                  <div
+                    className="bg-yellow-400 h-full transition-all duration-200"
+                    style={{ width: `${calibrationProgress}%` }}
+                  />
+                </div>
+                <span className="text-[9px] font-mono font-black text-[#1a2814] mt-0.5">{calibrationProgress}%</span>
+              </div>
+            )}
+
+            {/* Center Mascot Sprite Stage with Poppy Jelly Physics */}
+            <div
+              className={`relative transition-transform duration-200 ${
+                isReviving ? 'animate-backflip' : ''
+              } ${isPetting ? 'animate-jelly scale-115' : ''} ${flashing ? 'animate-level-flash' : ''} ${
+                refused ? 'animate-knife-shake' : ''
+              }`}
+              style={{
+                transform: `translateX(${posX}px) scaleX(${direction})`,
+              }}
+            >
+              {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote, look) : renderMascotGraphic(state, hp)}
+
+              {/* Corn fly-in on feeding */}
+              {feedBurst !== null && (
+                <div key={feedBurst} className="absolute inset-0 pointer-events-none z-30">
+                  {FEED_CORN_FROM.map(([dx, dy], i) => (
+                    <span
+                      key={i}
+                      className="absolute left-1/2 top-1/2 text-sm animate-corn-fly"
+                      style={{ ['--dx' as any]: `${dx}px`, ['--dy' as any]: `${dy}px`, animationDelay: `${i * 60}ms` }}
+                    >
+                      🌽
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Bottom 4 Classic LCD Icons */}
+            <div className="flex items-center justify-between w-full px-2 pb-0.5 text-[9px] font-mono select-none opacity-70">
+              <span title="Clean">🦆</span>
+              <span title="Health Meter">⚖️</span>
+              <span title="Discipline">🗯️</span>
+              <span className={state === 'THRIVING' ? 'scale-125 text-emerald-800 font-black' : ''} title="Attention">💖</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Integrated Machine Stats Bar */}
+        <div
+          className="w-full max-w-[200px] bg-black/80 rounded-lg px-2 py-1 text-white border border-black/80 flex items-center justify-between text-[9px] font-black select-none z-10 shadow-sm"
+          style={{ WebkitAppRegion: 'no-drag' } as any}
+        >
+          <div className="flex items-center gap-1">
+            <span className="text-[10px]">❤️</span>
+            <span className="font-mono">{Math.round(hp)}%</span>
+            <div className="w-12 bg-neutral-800 rounded-full h-1.5 border border-black/60 overflow-hidden ml-0.5">
+              <div
+                className={`h-full transition-all duration-500 ${
+                  hp >= 80 ? 'bg-emerald-400' : hp >= 40 ? 'bg-yellow-400' : 'bg-rose-500'
+                }`}
+                style={{ width: `${Math.max(4, hp)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 font-mono">
+            <span>Lv.{profile.level}</span>
+            {(alwaysShowCorn || hovered) && (
+              <span className={enoughCorn ? 'text-emerald-400' : 'text-amber-300'}>
+                🌽{profile.corn}/{need}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* 3 Classic Physical Buttons: [A] Pet, [B] Feed, [C] Lock */}
+        <div
+          className="flex items-center justify-around w-full pt-1 pb-0.5 px-3 z-10"
+          style={{ WebkitAppRegion: 'no-drag' } as any}
+        >
+          {/* Button A: Pet */}
+          <div className="flex flex-col items-center">
+            <button
+              type="button"
+              onClick={handlePet}
+              className="w-8 h-8 rounded-full border-2 border-black/80 shadow-[0_2px_0_0_#000] flex items-center justify-center font-black text-xs transition-transform active:translate-y-0.5 cursor-pointer"
+              style={{
+                background: skinConfig.buttonBg,
+                borderColor: skinConfig.buttonBorder,
+                color: skinConfig.buttonTextColor,
+              }}
+              title="Button A: Pet Duck 💖"
+            >
+              A
+            </button>
+            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5" style={labelStyle}>Pet</span>
+          </div>
+
+          {/* Button B: Feed */}
+          <div className="flex flex-col items-center">
+            <button
+              type="button"
+              onClick={handleFeed}
+              className="w-8 h-8 rounded-full border-2 border-black/80 shadow-[0_2px_0_0_#000] flex items-center justify-center font-black text-xs transition-transform active:translate-y-0.5 cursor-pointer"
+              style={{
+                background: skinConfig.buttonBg,
+                borderColor: skinConfig.buttonBorder,
+                color: skinConfig.buttonTextColor,
+              }}
+              title={`Button B: Feed (${profile.corn}/${need} 🌽)`}
+            >
+              B
+            </button>
+            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5" style={labelStyle}>Feed</span>
+          </div>
+
+          {/* Button C: Lock / Move */}
+          <div className="flex flex-col items-center">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleLock?.(!isLocked);
+              }}
+              className={`w-8 h-8 rounded-full border-2 border-black/80 shadow-[0_2px_0_0_#000] flex items-center justify-center font-black text-[10px] transition-transform active:translate-y-0.5 cursor-pointer ${
+                !isLocked ? 'ring-2 ring-amber-400 animate-pulse' : ''
+              }`}
+              style={{
+                background: skinConfig.buttonBg,
+                borderColor: skinConfig.buttonBorder,
+                color: skinConfig.buttonTextColor,
+              }}
+              title={isLocked ? 'Button C: Position Locked. Click to Unlock & Move' : 'Button C: Position Unlocked. Click to Lock'}
+            >
+              {isLocked ? '🔒' : '🔓'}
+            </button>
+            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5" style={labelStyle}>
+              {isLocked ? 'Lock' : 'Move'}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

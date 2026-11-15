@@ -24,6 +24,7 @@ import {
   type PetProfile,
 } from './progression';
 import { BAD_TEXT, BUTTON_NEUTRAL, BUTTON_PRIMARY, BUTTON_SELECTED, CARD, GOOD_TEXT, LABEL, MUTED, TRACK } from './theme';
+import { DEFAULT_SKIN, EGG_SHELL_SKINS, type EggShellSkin } from './eggShellSkins';
 
 interface MyDuckProps {
   pet: PetProfile;
@@ -33,11 +34,24 @@ interface MyDuckProps {
   onFeed: () => boolean;
   /** Seconds of upright sitting that earn one corn right now (depends on demo mode). */
   cornEverySeconds: number;
+  isLocked?: boolean;
+  onToggleLock?: (locked: boolean) => void;
+  skin?: EggShellSkin;
+  onSelectSkin?: (skin: EggShellSkin) => void;
 }
 
 const SLOTS: CosmeticSlot[] = ['hat', 'face', 'neck'];
 
-export const MyDuck: React.FC<MyDuckProps> = ({ pet, onPetChange, onFeed, cornEverySeconds }) => {
+export const MyDuck: React.FC<MyDuckProps> = ({
+  pet,
+  onPetChange,
+  onFeed,
+  cornEverySeconds,
+  isLocked = true,
+  onToggleLock,
+  skin = DEFAULT_SKIN,
+  onSelectSkin,
+}) => {
   const stage = stageOf(pet);
   const need = cornNeeded(pet);
   const enough = canFeed(pet);
@@ -175,6 +189,30 @@ export const MyDuck: React.FC<MyDuckProps> = ({ pet, onPetChange, onFeed, cornEv
           </div>
         </div>
 
+        {/* Desktop Pet Position Lock / Unlock */}
+        <div className={`${CARD} p-4 flex items-center justify-between`}>
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{isLocked ? '🔒' : '🔓'}</span>
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-wider">
+                {isLocked ? 'Desktop Pet: Locked' : 'Desktop Pet: Movable'}
+              </h3>
+              <p className={`text-[11px] ${MUTED}`}>
+                {isLocked
+                  ? 'Docked in corner. Click unlock to drag around screen.'
+                  : 'Unlocked! Click and drag the egg machine to move it.'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onToggleLock?.(!isLocked)}
+            className={isLocked ? BUTTON_NEUTRAL : BUTTON_PRIMARY}
+            title={isLocked ? 'Unlock to drag anywhere' : 'Lock position'}
+          >
+            {isLocked ? 'Unlock 🔓' : 'Lock 🔒'}
+          </button>
+        </div>
+
         <div className={`${CARD} p-4`}>
           <h3 className="text-xs font-black uppercase tracking-wider mb-2">Stats</h3>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
@@ -185,6 +223,77 @@ export const MyDuck: React.FC<MyDuckProps> = ({ pet, onPetChange, onFeed, cornEv
               </div>
             ))}
           </dl>
+        </div>
+
+        {/* Vintage Egg Shell Skins */}
+        <div className={`${CARD} p-4 space-y-3`}>
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-xs font-black uppercase tracking-wider">Egg Shell Skin 🥚</h3>
+            <span className="text-[10px] font-bold text-[var(--accent)]">Vintage Editions</span>
+          </div>
+          <p className={`text-[11px] ${MUTED}`}>
+            Change the look of your desktop egg machine. Changes apply immediately!
+          </p>
+
+          <div className="space-y-2">
+            {(Object.values(EGG_SHELL_SKINS) as (typeof EGG_SHELL_SKINS[EggShellSkin])[]).map((s) => {
+              const active = skin === s.id;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => onSelectSkin?.(s.id)}
+                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                    active
+                      ? 'bg-[var(--accent-soft)] border-[var(--accent)] shadow-sm'
+                      : 'bg-[var(--chip)] border-[var(--line)] hover:border-[var(--muted)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    {/* Mini Egg Color Indicator */}
+                    <div
+                      className="w-7 h-9 rounded-[50%_50%_45%_45%_/_60%_60%_40%_40%] border-2 border-black/80 shadow-sm flex items-center justify-center relative overflow-hidden"
+                      style={{ background: s.shellGradient }}
+                    >
+                      <div
+                        className="w-3.5 h-3.5"
+                        style={{
+                          background: s.starBurstBg,
+                          clipPath: 'polygon(18% 0%, 50% 7%, 82% 0%, 93% 18%, 100% 50%, 93% 82%, 82% 100%, 50% 93%, 18% 100%, 7% 82%, 0% 50%, 7% 18%)',
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-black">{s.name}</span>
+                        {active && (
+                          <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-[var(--accent)] text-[var(--accent-ink)]">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-[10px] ${MUTED}`}>{s.tagline}</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectSkin?.(s.id);
+                    }}
+                    className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-all ${
+                      active
+                        ? BUTTON_SELECTED
+                        : BUTTON_NEUTRAL
+                    }`}
+                  >
+                    {active ? 'Selected ✓' : 'Use Skin'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

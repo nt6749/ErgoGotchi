@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onToggleDemoMode: (callback) => ipcRenderer.on('menu-toggle-demo', callback),
   setCameraList: (cameras, activeId) => ipcRenderer.send('camera-list', { cameras, activeId }),
   onSelectCamera: (callback) => ipcRenderer.on('menu-select-camera', (event, deviceId) => callback(deviceId)),
+  onToggleLock: (callback) => ipcRenderer.on('menu-toggle-lock', (event, locked) => callback(locked)),
+  setLocked: (locked) => ipcRenderer.send('pet-set-locked', locked),
+  onFeedDuck: (callback) => ipcRenderer.on('menu-feed-duck', callback),
   onActivity: (callback) => ipcRenderer.on('activity', (event, activity) => callback(activity)),
   onForceActivity: (callback) => ipcRenderer.on('menu-force-activity', (event, value) => callback(value)),
   onAddCorn: (callback) => ipcRenderer.on('menu-add-corn', (event, amount) => callback(amount)),
@@ -32,4 +35,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
   setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('set-login-item-settings', openAtLogin),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  onMenuCheckUpdates: (callback) => ipcRenderer.on('menu-check-updates', () => callback()),
 });
