@@ -1,0 +1,68 @@
+{
+  "name": "sunhacks-ergogotchi",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "ErgoGotchi: Biometric Desktop Companion & Ergonomic Telemetry Engine for sunhacks 2026",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron": "electron electron/main.cjs",
+    "test": "vitest run",
+    "package": "npm run build && electron-builder --dir",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.sunhacks.ergogotchi",
+    "productName": "ErgoGotchi",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.14",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.453.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.0.0",
+    "electron-builder": "^26.18.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.2"
+  }
+}
