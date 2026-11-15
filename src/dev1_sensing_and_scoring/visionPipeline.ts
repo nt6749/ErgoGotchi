@@ -204,6 +204,11 @@ export class VisionPipeline {
     }
   }
 
+  /** Return active MediaStream so UI previews can share the camera stream without opening a second exclusive device lock */
+  public getVideoStream(): MediaStream | null {
+    return (this.videoElement?.srcObject as MediaStream) || null;
+  }
+
   /** Cameras the user can pick from (labels need camera permission, which Electron grants). */
   public async listCameras(): Promise<CameraOption[]> {
     try {
