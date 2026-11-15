@@ -1,6 +1,6 @@
 # 👾 ErgoGotchi (ErgoBuddy)
 ### Biometric Desktop Companion & Ergonomic Telemetry Engine
-> **sunhacks 2026** · Target Tracks: **Best Mascot**, **Future of Work (JFFVentures)**, **Best Use of Gemini API**, **Best Use of Tiger Data**, **Best Gaming**, **Best Use of Vultr**, **SpaceXSI A-Team**.
+> **sunhacks 2026** · Target Tracks: **Best Mascot**, **Future of Work (JFFVentures)**, **Best Use of Gemini API**, **Best Use of Tiger Data**, **Best Gaming**, **SpaceXSI A-Team**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Google Gemini](https://img.shields.io/badge/Google%20Gemini-Powered-blue)](https://ai.google.dev/)
