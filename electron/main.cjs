@@ -11,11 +11,17 @@ const http = require('http');
 const fs = require('fs');
 const { startActivityWatcher } = require('./activityWatcher.cjs');
 const {
+  getAppVersion,
   checkForUpdates,
   downloadAndInstallUpdate,
   getLoginItemSettings,
   setLoginItemSettings,
 } = require('./updater.cjs');
+
+try {
+  app.setName('ErgoGotchi');
+  app.setVersion(getAppVersion());
+} catch (e) {}
 
 let petWindow = null;
 let dashboardWindow = null;
@@ -489,7 +495,7 @@ ipcMain.handle('set-login-item-settings', (event, openAtLogin) => {
 });
 
 ipcMain.handle('get-app-version', () => {
-  return app.getVersion();
+  return getAppVersion();
 });
 
 app.whenReady().then(async () => {

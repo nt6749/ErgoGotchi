@@ -20,6 +20,34 @@ const REPO_OWNER = 'nt6749';
 const REPO_NAME = 'sunhacks-project2';
 const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
 
+let appVersion = '1.0.2';
+try {
+  const pkg = require('../package.json');
+  if (pkg && pkg.version) {
+    appVersion = pkg.version;
+  }
+} catch (e) {
+  try {
+    if (app && typeof app.getAppPath === 'function') {
+      const pkg = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'));
+      if (pkg && pkg.version) appVersion = pkg.version;
+    }
+  } catch (e2) {}
+}
+
+function getAppVersion() {
+  try {
+    if (app && typeof app.getVersion === 'function') {
+      const v = app.getVersion();
+      // If Electron returns its internal binary version (e.g. 33.x.x in dev), use package.json version
+      if (v && !v.startsWith('33.') && !v.startsWith('32.') && !v.startsWith('34.')) {
+        return v;
+      }
+    }
+  } catch (e) {}
+  return appVersion;
+}
+
 function parseVersion(v) {
   if (!v) return [0, 0, 0];
   const str = String(v).replace(/^v/, '').trim();
@@ -39,7 +67,7 @@ function compareVersions(v1, v2) {
 }
 
 async function checkForUpdates() {
-  const currentVersion = app.getVersion() || '1.0.1';
+  const currentVersion = getAppVersion();
 
   try {
     const res = await fetch(GITHUB_API_URL, {
@@ -199,6 +227,7 @@ function setLoginItemSettings(openAtLogin) {
 }
 
 module.exports = {
+  getAppVersion,
   checkForUpdates,
   downloadAndInstallUpdate,
   getLoginItemSettings,

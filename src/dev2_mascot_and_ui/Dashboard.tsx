@@ -950,7 +950,7 @@ GROUP BY bucket, session_id;`}</pre>
                   <div className="flex items-center gap-2">
                     <span className="text-lg">🚀</span>
                     <div>
-                      <h3 className="font-bold text-base">Launch at System Startup</h3>
+                      <h3 className="font-bold text-base">Launch at System Startup (portable app not supported)</h3>
                       <p className={`text-xs ${MUTED}`}>Configure ErgoGotchi to start automatically when your PC boots</p>
                     </div>
                   </div>
