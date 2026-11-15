@@ -22,6 +22,7 @@ let dashboardWindow = null;
 let backendProcess = null;
 let isWizardActive = false;
 let currentDifficulty = 'normal';
+let alwaysShowCorn = true;
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
@@ -105,6 +106,26 @@ function stopBackend() {
   }
 }
 
+function getSavedPetPosition() {
+  try {
+    const p = path.join(app.getPath('userData'), 'pet-position.json');
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (typeof data.x === 'number' && typeof data.y === 'number') {
+        return data;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+function savePetPosition(pos) {
+  try {
+    const p = path.join(app.getPath('userData'), 'pet-position.json');
+    fs.writeFileSync(p, JSON.stringify(pos), 'utf8');
+  } catch (e) {}
+}
+
 function createPetWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
@@ -112,8 +133,12 @@ function createPetWindow() {
   // Room for the mascot's ±40px wander and the speech bubble above it
   const initialWidth = 280;
   const initialHeight = 320;
-  const initialX = screenWidth - initialWidth - 60;
-  const initialY = screenHeight - initialHeight - 10;
+  const defaultX = screenWidth - initialWidth - 60;
+  const defaultY = screenHeight - initialHeight - 10;
+
+  const saved = getSavedPetPosition();
+  const initialX = saved && typeof saved.x === 'number' ? saved.x : defaultX;
+  const initialY = saved && typeof saved.y === 'number' ? saved.y : defaultY;
 
   petWindow = new BrowserWindow({
     icon: APP_ICON_PATH,
@@ -171,6 +196,35 @@ function createPetWindow() {
       {
         label: '📊 Open Companion Dashboard',
         click: () => createDashboardWindow(),
+      },
+      {
+        label: '📌 Dock Pet to Corner',
+        click: () => {
+          if (!petWindow) return;
+          const primaryDisplay = screen.getPrimaryDisplay();
+          const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+          const initialWidth = 280;
+          const initialHeight = 320;
+          const initialX = screenWidth - initialWidth - 60;
+          const initialY = screenHeight - initialHeight - 10;
+          petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
+          savePetPosition({ x: initialX, y: initialY });
+          petWindow.webContents.send('menu-pet-docked');
+        },
+      },
+      {
+        label: '🌽 Always Show Corn Level',
+        type: 'checkbox',
+        checked: alwaysShowCorn,
+        click: (menuItem) => {
+          alwaysShowCorn = menuItem.checked;
+          if (petWindow && !petWindow.isDestroyed()) {
+            petWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+          }
+          if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+            dashboardWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+          }
+        },
       },
       {
         label: '🔄 Check for Updates...',
@@ -312,10 +366,35 @@ function createDashboardWindow() {
 }
 
 // IPC Handlers
-ipcMain.on('pet-move', (event, { x, y }) => {
+ipcMain.on('pet-move', (event, { x, y, save = false }) => {
   if (petWindow) {
-    petWindow.setPosition(x, y);
+    const rx = Math.round(x);
+    const ry = Math.round(y);
+    petWindow.setPosition(rx, ry);
+    if (save) {
+      savePetPosition({ x: rx, y: ry });
+    }
   }
+});
+
+ipcMain.on('pet-move-by', (event, { dx, dy, save = false }) => {
+  if (petWindow) {
+    const [currX, currY] = petWindow.getPosition();
+    const nx = currX + Math.round(dx);
+    const ny = currY + Math.round(dy);
+    petWindow.setPosition(nx, ny);
+    if (save) {
+      savePetPosition({ x: nx, y: ny });
+    }
+  }
+});
+
+ipcMain.handle('get-pet-position', () => {
+  if (petWindow) {
+    const [x, y] = petWindow.getPosition();
+    return { x, y };
+  }
+  return { x: 0, y: 0 };
 });
 
 ipcMain.on('pet-set-bounds', (event, bounds) => {
@@ -351,6 +430,18 @@ ipcMain.on('pet-dock-corner', () => {
   const initialX = screenWidth - initialWidth - 60;
   const initialY = screenHeight - initialHeight - 10;
   petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
+  savePetPosition({ x: initialX, y: initialY });
+  petWindow.webContents.send('menu-pet-docked');
+});
+
+ipcMain.on('set-always-show-corn', (event, show) => {
+  alwaysShowCorn = !!show;
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+  }
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+  }
 });
 
 ipcMain.on('pet-ignore-mouse', (event, ignore) => {

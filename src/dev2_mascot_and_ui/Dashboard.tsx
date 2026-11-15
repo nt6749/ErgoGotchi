@@ -209,6 +209,52 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   });
 
+  const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.alwaysShowCorn') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleAlwaysShowCorn = (checked: boolean) => {
+    setAlwaysShowCorn(checked);
+    try {
+      localStorage.setItem('ergogotchi.alwaysShowCorn', String(checked));
+      window.dispatchEvent(new CustomEvent('always-show-corn-changed', { detail: checked }));
+    } catch {}
+    if ((window as any).electronAPI?.setAlwaysShowCorn) {
+      (window as any).electronAPI.setAlwaysShowCorn(checked);
+    }
+  };
+
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'ergogotchi.alwaysShowCorn') {
+        setAlwaysShowCorn(e.newValue !== 'false');
+      }
+    };
+    const handleCustom = (e: any) => {
+      if (typeof e.detail === 'boolean') {
+        setAlwaysShowCorn(e.detail);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('always-show-corn-changed', handleCustom);
+    if ((window as any).electronAPI?.onAlwaysShowCornChanged) {
+      (window as any).electronAPI.onAlwaysShowCornChanged((val: boolean) => {
+        setAlwaysShowCorn(val);
+        try {
+          localStorage.setItem('ergogotchi.alwaysShowCorn', String(val));
+        } catch {}
+      });
+    }
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('always-show-corn-changed', handleCustom);
+    };
+  }, []);
+
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [checkResult, setCheckResult] = useState<UpdateInfo | null>(updateInfo || null);
 
@@ -930,6 +976,85 @@ GROUP BY bucket, session_id;`}</pre>
                     type="checkbox"
                     checked={launchOnStartup}
                     onChange={(e) => onToggleLaunchOnStartup?.(e.target.checked)}
+                    className="accent-yellow-400 w-5 h-5 cursor-pointer ml-4"
+                  />
+                </label>
+              </div>
+
+              {/* Desktop Pet Placement & Draggable Setting */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">📍</span>
+                    <div>
+                      <h3 className="font-bold text-base">Desktop Pet Placement</h3>
+                      <p className={`text-xs ${MUTED}`}>Freely drag your duck anywhere on screen or snap back to corner</p>
+                    </div>
+                  </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-mono font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    DRAGGABLE
+                  </span>
+                </div>
+
+                <div className={`${PANEL} p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3`}>
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-[var(--ink)]">
+                      Move your pet freely across monitors and desktop space
+                    </div>
+                    <div className={`text-[11px] ${MUTED}`}>
+                      Click and hold your duck to drag it to any corner, edge, or secondary monitor. Your position is automatically saved across sessions!
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if ((window as any).electronAPI?.dockPet) {
+                        (window as any).electronAPI.dockPet();
+                      } else {
+                        localStorage.removeItem('ergogotchi_web_pet_offset');
+                        window.dispatchEvent(new CustomEvent('pet-docked'));
+                      }
+                    }}
+                    className={`${BUTTON_PRIMARY} whitespace-nowrap flex items-center gap-1.5`}
+                  >
+                    <span>📌</span>
+                    <span>Dock to Corner</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Pet Display: Always Show Corn Level Overlay Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🌽</span>
+                    <div>
+                      <h3 className="font-bold text-base">Corn Level & Pantry Overlay</h3>
+                      <p className={`text-xs ${MUTED}`}>Choose whether the corn progress card stays pinned above your pet</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-mono font-semibold ${
+                    alwaysShowCorn
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                  }`}>
+                    {alwaysShowCorn ? 'ALWAYS VISIBLE' : 'ON HOVER ONLY'}
+                  </span>
+                </div>
+
+                <label className={`${PANEL} p-3.5 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-600 transition`}>
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-semibold text-[var(--ink)]">
+                      Always show corn level above pet
+                    </div>
+                    <div className={`text-[11px] ${MUTED}`}>
+                      When enabled (default), your corn count and level-up requirement stay visible above your pet at all times. If unchecked, the indicator only appears while hovering.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={alwaysShowCorn}
+                    onChange={(e) => handleToggleAlwaysShowCorn(e.target.checked)}
                     className="accent-yellow-400 w-5 h-5 cursor-pointer ml-4"
                   />
                 </label>

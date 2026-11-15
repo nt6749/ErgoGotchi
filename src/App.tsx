@@ -83,6 +83,12 @@ interface ElectronAPI {
   onSetDifficulty?: (cb: (level: DifficultyLevel) => void) => void;
   centerPet?: (width?: number, height?: number) => void;
   dockPet?: () => void;
+  movePet?: (x: number, y: number, save?: boolean) => void;
+  movePetBy?: (dx: number, dy: number, save?: boolean) => void;
+  getPetPosition?: () => Promise<{ x: number; y: number }>;
+  onPetDocked?: (cb: () => void) => void;
+  setAlwaysShowCorn?: (show: boolean) => void;
+  onAlwaysShowCornChanged?: (cb: (show: boolean) => void) => void;
   checkForUpdates?: () => Promise<UpdateInfo>;
   downloadAndInstallUpdate?: (asset: { name: string; downloadUrl: string; size?: number }) => Promise<{ success: boolean; path?: string; error?: string }>;
   onUpdateProgress?: (cb: (progress: UpdateProgress) => void) => void;

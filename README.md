@@ -7,8 +7,8 @@
 [![Tiger Data](https://img.shields.io/badge/Tiger%20Data-TimescaleDB%20Hypertables-orange)](https://www.tigerdata.com/)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Edge%20Biometrics-cyan)](https://developers.google.com/mediapipe)
 [![Release](https://img.shields.io/github/v/release/nt6749/sunhacks-project2?color=emerald&label=Latest%20Release)](https://github.com/nt6749/sunhacks-project2/releases)
-[![Windows](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://github.com/nt6749/sunhacks-project2/releases)
-[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/sunhacks-project2/releases)
+[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-blue?logo=windows)](https://github.com/nt6749/sunhacks-project2/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/sunhacks-project2/releases/latest)
 
 ---
 
@@ -18,10 +18,10 @@
 
 | Platform | Recommended Installer | Alternative / Portable | Status |
 | :--- | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.1 Ready` |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 All Release Assets](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.1 Ready` |
+| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.2 Ready` |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 All Release Assets](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.2 Ready` |
 
-> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Direct download mirror for current build: [Windows Setup (`ErgoGotchi.Setup.1.0.0.exe`)](https://github.com/nt6749/sunhacks-project2/releases/download/v1.0.1/ErgoGotchi.Setup.1.0.0.exe) · [macOS DMG (`ErgoGotchi-1.0.0-arm64.dmg`)](https://github.com/nt6749/sunhacks-project2/releases/download/v1.0.1/ErgoGotchi-1.0.0-arm64.dmg).
+> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.2.exe`), Portable (`ErgoGotchi-Portable-1.0.2.exe`), and macOS Disk Image (`ErgoGotchi-1.0.2.dmg`).
 
 ---
 
@@ -77,8 +77,10 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
 
 ---
 
-## ✨ Latest Release Highlights & Native Capabilities (v1.0.1+)
+## ✨ Latest Release Highlights & Native Capabilities (v1.0.2)
 
+- 🌽 **Always-On Corn Progress Overlay**: Keep your duck's corn count and level-up requirements pinned above your pet at all times! Enabled by default, with a toggle in Dashboard Settings and the right-click menu to switch back to show-on-hover mode if you prefer a minimal look.
+- 📍 **Free-Floating Draggable Pet**: Don't want your pet in the bottom-right corner? Click and drag your duck anywhere across your screens and workspace! It automatically saves its position across sessions, with a quick **"📌 Dock Pet to Corner"** option in the right-click menu and Companion Dashboard settings.
 - 🔄 **In-App GitHub Auto-Updater**: When ErgoGotchi launches, it quietly checks GitHub Releases for new updates. If an update is detected, a sleek update banner appears with a direct **Restart & Update** button, downloading and launching the update seamlessly in one click. Configurable in Companion Dashboard settings (toggle auto-updates or click "Check for Updates" manually).
 - 🚀 **Launch at System Startup**: Prefer ErgoGotchi to greet you whenever your PC turns on? Toggle **"Launch ErgoGotchi on system startup"** directly in Dashboard Settings (`openAtLogin` integration).
 - 📹 **Live Vision Diagnostics & Camera Viewfinder**: High-speed live webcam preview built into the Companion Dashboard. Switch cameras, toggle mirror preview, and run the 5-second upright posture calibration with visual real-time facial landmark and shoulder tracking overlays.
@@ -134,8 +136,8 @@ Choose the method that works best for you:
 
 | Platform | Installer File | Installation Steps |
 | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Windows Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Grab installer from GitHub Releases (or direct mirror `ErgoGotchi.Setup.1.0.0.exe`).<br>2. Run the `.exe` installer wizard.<br>3. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>4. Check "Create Desktop Shortcut".<br>5. Click **Install** & launch! |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download macOS Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Open the `.dmg` file from GitHub Releases.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
+| **🪟 Windows (10/11)** | [📥 **Download Windows Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Download installer wizard.<br>2. Run the `.exe` installer wizard.<br>3. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>4. Check "Create Desktop Shortcut".<br>5. Click **Install** & launch! |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download macOS Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
 
 #### 🪄 The First-Run Onboarding Wizard
 When you open ErgoGotchi for the first time, a cute setup wizard appears:

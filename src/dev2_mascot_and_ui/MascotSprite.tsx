@@ -65,6 +65,40 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 }) => {
   const [isPetting, setIsPetting] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.alwaysShowCorn') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const [webOffset, setWebOffset] = useState<{ x: number; y: number }>(() => {
+    try {
+      const saved = localStorage.getItem('ergogotchi_web_pet_offset');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return { x: 0, y: 0 };
+  });
+
+  const dragRef = useRef<{
+    isMouseDown: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    hasDragged: boolean;
+  }>({
+    isMouseDown: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    hasDragged: false,
+  });
+
+  const isHoveredRef = useRef(false);
+
   // Feeding feedback: a burst of corn flying in, or a "not enough" shake
   const [feedBurst, setFeedBurst] = useState<number | null>(null);
   const [refused, setRefused] = useState(false);
@@ -187,6 +221,136 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     };
   }, [speechText]);
 
+  // Reset web offset if the pet is docked to corner via menu or settings
+  useEffect(() => {
+    const handleReset = () => {
+      setWebOffset({ x: 0, y: 0 });
+      try {
+        localStorage.removeItem('ergogotchi_web_pet_offset');
+      } catch (e) {}
+    };
+
+    if (electronAPI?.onPetDocked) {
+      electronAPI.onPetDocked(handleReset);
+    }
+    window.addEventListener('pet-docked', handleReset);
+    return () => {
+      window.removeEventListener('pet-docked', handleReset);
+    };
+  }, []);
+
+  // Listen for always-show-corn changes across tabs/windows or right-click menu
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'ergogotchi.alwaysShowCorn') {
+        setAlwaysShowCorn(e.newValue !== 'false');
+      }
+    };
+    const handleCustom = (e: any) => {
+      if (typeof e.detail === 'boolean') {
+        setAlwaysShowCorn(e.detail);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('always-show-corn-changed', handleCustom);
+    if (electronAPI?.onAlwaysShowCornChanged) {
+      electronAPI.onAlwaysShowCornChanged((val: boolean) => {
+        setAlwaysShowCorn(val);
+        try {
+          localStorage.setItem('ergogotchi.alwaysShowCorn', String(val));
+        } catch {}
+      });
+    }
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('always-show-corn-changed', handleCustom);
+    };
+  }, []);
+
+  // Draggable Window & Pet Physics
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Only primary (left) button initiates drag
+    if (e.button !== 0) return;
+    dragRef.current = {
+      isMouseDown: true,
+      startX: e.screenX,
+      startY: e.screenY,
+      lastX: e.screenX,
+      lastY: e.screenY,
+      hasDragged: false,
+    };
+    electronAPI?.setIgnoreMouse?.(false);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragRef.current.isMouseDown) return;
+
+      const totalDist = Math.hypot(
+        e.screenX - dragRef.current.startX,
+        e.screenY - dragRef.current.startY
+      );
+
+      // Drag threshold: require at least 5px of intentional movement
+      if (!dragRef.current.hasDragged) {
+        if (totalDist > 5) {
+          dragRef.current.hasDragged = true;
+          setIsDragging(true);
+        } else {
+          return;
+        }
+      }
+
+      const dx = e.screenX - dragRef.current.lastX;
+      const dy = e.screenY - dragRef.current.lastY;
+      dragRef.current.lastX = e.screenX;
+      dragRef.current.lastY = e.screenY;
+
+      if (electronAPI?.isElectron && electronAPI?.movePetBy) {
+        electronAPI.movePetBy(dx, dy, false);
+      } else {
+        setWebOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (!dragRef.current.isMouseDown) return;
+      dragRef.current.isMouseDown = false;
+
+      if (dragRef.current.hasDragged) {
+        if (electronAPI?.isElectron && electronAPI?.movePetBy) {
+          electronAPI.movePetBy(0, 0, true);
+        } else {
+          try {
+            setWebOffset((curr) => {
+              localStorage.setItem('ergogotchi_web_pet_offset', JSON.stringify(curr));
+              return curr;
+            });
+          } catch (err) {}
+        }
+
+        setTimeout(() => {
+          dragRef.current.hasDragged = false;
+          setIsDragging(false);
+        }, 80);
+      } else {
+        setIsDragging(false);
+      }
+
+      if (!isHoveredRef.current) {
+        captureMouse.onMouseLeave();
+        setHovered(false);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
   // Audio trigger on state changes
   useEffect(() => {
     if (isReviving) {
@@ -196,9 +360,10 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     }
   }, [state, isReviving]);
 
-  // Soft walking wandering along taskbar when Thriving/Neutral
+  // Soft walking wandering along taskbar when Thriving/Neutral (paused during drag)
   useEffect(() => {
     if (!PET_WALKS) return;
+    if (isDragging) return;
     if (state === 'SLOUCHING' || state === 'WILTED' || state === 'CALIBRATING' || state === 'AWAY') {
       return;
     }
@@ -213,11 +378,12 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     }, 100);
 
     return () => clearInterval(walkInterval);
-  }, [state, direction]);
+  }, [state, direction, isDragging]);
 
   // Clicking feeds the pet: it eats the corn it needs to level up, or refuses if there isn't enough
   const handleFeed = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (dragRef.current.hasDragged) return;
     if (!onFeed) return;
     if (onFeed()) {
       const id = Date.now();
@@ -236,7 +402,12 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
   return (
     <div 
       className="relative flex flex-col items-center justify-end select-none"
-      style={{ width: '180px', minHeight: speechText ? '260px' : '170px' }}
+      style={{
+        width: '180px',
+        minHeight: speechText ? '260px' : '170px',
+        transform: electronAPI?.isElectron ? undefined : `translate(${webOffset.x}px, ${webOffset.y}px)`,
+        transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+      }}
     >
       {/* Dynamic Comic Speech Bubble */}
       {speechText && (
@@ -269,31 +440,49 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
       {/* Mascot Sprite Container */}
       <div
         onMouseEnter={() => {
+          isHoveredRef.current = true;
           captureMouse.onMouseEnter();
           setHovered(true);
         }}
         onMouseLeave={() => {
-          captureMouse.onMouseLeave();
-          setHovered(false);
+          isHoveredRef.current = false;
+          if (!isDragging && !dragRef.current.isMouseDown) {
+            captureMouse.onMouseLeave();
+            setHovered(false);
+          }
         }}
+        onMouseDown={handleMouseDown}
         onClick={handleFeed}
-        onDoubleClick={onOpenDashboard}
+        onDoubleClick={(e) => {
+          if (dragRef.current.hasDragged) return;
+          onOpenDashboard();
+        }}
         onContextMenu={(e) => {
           // In Electron, let the native right-click menu open instead
           if ((window as any).electronAPI?.isElectron) return;
           e.preventDefault();
           onRecalibrate();
         }}
-        title={pet ? undefined : 'Double-click to open Dashboard | Right-click to Calibrate'}
-        className={`cursor-pointer transition-transform duration-300 relative ${
-          isReviving ? 'animate-backflip' : ''
-        } ${isPetting ? 'scale-110' : ''} ${flashing ? 'animate-level-flash' : ''} ${
-          refused ? 'animate-knife-shake' : ''
-        }`}
+        title="Drag anywhere to move · Click to feed · Double-click for Dashboard"
+        className={`transition-transform duration-150 relative select-none ${
+          isDragging ? 'cursor-grabbing scale-105 drop-shadow-xl' : 'cursor-grab hover:scale-102'
+        } ${isReviving ? 'animate-backflip' : ''} ${isPetting ? 'scale-110' : ''} ${
+          flashing ? 'animate-level-flash' : ''
+        } ${refused ? 'animate-knife-shake' : ''}`}
         style={{
           transform: `translateX(${posX}px) scaleX(${direction})`,
         }}
       >
+        {/* Cute Draggable Indicator Hint when hovered */}
+        {hovered && !isDragging && !banner && (
+          <div
+            className={`absolute ${(alwaysShowCorn || hovered) && pet ? '-top-16' : '-top-7'} left-1/2 -translate-x-1/2 pointer-events-none z-50 whitespace-nowrap px-2 py-0.5 rounded-full bg-black/80 text-yellow-300 text-[10px] font-mono tracking-wide border border-yellow-400/50 shadow-md flex items-center gap-1 opacity-95 transition-all duration-200`}
+          >
+            <span>✥</span>
+            <span>drag to move</span>
+          </div>
+        )}
+
         {/* Render State Specific SVG Graphic */}
         {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote, look) : renderMascotGraphic(state, hp)}
 
@@ -340,9 +529,9 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
           </div>
         )}
 
-        {/* Hover: corn in the pantry vs corn needed for the next level */}
-        {pet && hovered && !banner && (
-          <div className="absolute -top-10 left-1/2 -translate-x-1/2 pointer-events-none z-40 whitespace-nowrap text-center px-2 py-1 rounded-lg bg-white border-2 border-black shadow-[2px_2px_0_0_#000]">
+        {/* Corn status card: always shown if enabled (default), or shown on hover */}
+        {pet && (alwaysShowCorn || hovered) && !banner && (
+          <div className="absolute -top-10 left-1/2 -translate-x-1/2 pointer-events-none z-40 whitespace-nowrap text-center px-2 py-1 rounded-lg bg-white border-2 border-black shadow-[2px_2px_0_0_#000] transition-opacity duration-200">
             <div className={`text-[12px] font-black leading-tight ${enoughCorn ? 'text-emerald-600' : 'text-rose-600'}`}>
               {profile.corn}/{need} 🌽
             </div>

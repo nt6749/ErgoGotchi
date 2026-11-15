@@ -107,6 +107,7 @@ async function main() {
     const viteProc = spawn(npmCmd, ['run', 'dev'], {
       cwd: rootDir,
       stdio: 'pipe',
+      shell: process.platform === 'win32',
     });
 
     viteProc.stdout.on('data', (d) => {
@@ -140,6 +141,7 @@ async function main() {
     const electronProc = spawn(npmCmd, ['run', 'electron'], {
       cwd: rootDir,
       stdio: 'inherit',
+      shell: process.platform === 'win32',
     });
 
     children.push(electronProc);
