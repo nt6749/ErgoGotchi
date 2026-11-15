@@ -9,6 +9,10 @@ const path = require('path');
 let petWindow = null;
 let dashboardWindow = null;
 
+// Cameras reported by the pet window, shown in its right-click menu
+let cameraList = [];
+let activeCameraId = null;
+
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 
 function createPetWindow() {
@@ -75,6 +79,17 @@ function createPetWindow() {
       {
         label: '⚡ Toggle Demo Mode (D)',
         click: () => petWindow.webContents.send('menu-toggle-demo'),
+      },
+      {
+        label: '📷 Camera',
+        submenu: cameraList.length
+          ? cameraList.map((cam) => ({
+              label: cam.label,
+              type: 'radio',
+              checked: cam.deviceId === activeCameraId,
+              click: () => petWindow.webContents.send('menu-select-camera', cam.deviceId),
+            }))
+          : [{ label: 'No cameras found', enabled: false }],
       },
       { type: 'separator' },
       {
@@ -149,6 +164,12 @@ ipcMain.on('pet-ignore-mouse', (event, ignore) => {
   if (petWindow) {
     petWindow.setIgnoreMouseEvents(!!ignore, { forward: true });
   }
+});
+
+// The pet window reports its cameras so the right-click menu can offer them
+ipcMain.on('camera-list', (event, { cameras, activeId }) => {
+  cameraList = Array.isArray(cameras) ? cameras : [];
+  activeCameraId = activeId || null;
 });
 
 ipcMain.on('open-dashboard', () => {
