@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 from typing import Dict, List, Optional, Any
 
 from app.config import settings
@@ -11,15 +12,11 @@ from app.config import settings
 logger = logging.getLogger("ergogotchi.gemini")
 
 def _safe_json_loads(raw_text: str) -> Dict[str, Any]:
-    """Parse JSON safely even if the LLM wraps response in markdown code blocks."""
+    """Parse JSON safely even if the LLM wraps response in markdown code blocks or surrounding commentary."""
     text = (raw_text or "").strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+    if match:
+        text = match.group(1).strip()
     return json.loads(text)
 
 # Fixed Biomechanical Stretch Cues & Instructions (never hallucinated by LLM)
@@ -145,14 +142,15 @@ Rules:
         except Exception as e:
             logger.warning("Background Gemini warm-up failed for cue %s: %s", cue, e)
 
-    def determine_cue(self, reason: str, context: Dict[str, Any]) -> str:
+    def determine_cue(self, reason: str, context: Optional[Dict[str, Any]] = None) -> str:
         """Deterministically maps biometric telemetry context to a stretch cue."""
         if reason == "LOW_BLINK":
             return "LOOK_AWAY"
         if reason == "LONG_SESSION":
             return "STAND_UP"
 
-        worst_signal = context.get("worst_signal", "forward_head")
+        ctx = context if isinstance(context, dict) else {}
+        worst_signal = str(ctx.get("worst_signal") or "forward_head")
         if worst_signal == "forward_head":
             return "CHIN_TUCK"
         elif worst_signal in ("head_drop", "head_pitch"):
@@ -166,14 +164,18 @@ Rules:
         self,
         request_id: str,
         reason: str,
-        context: Dict[str, Any]
+        context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Deliver instant intervention line from warm cache, then trigger background refill.
         Guarantees sub-millisecond dispatch time to client.
         """
-        cue = self.determine_cue(reason, context)
-        hp = context.get("hp", 50)
+        ctx = context if isinstance(context, dict) else {}
+        cue = self.determine_cue(reason, ctx)
+        try:
+            hp = float(ctx.get("hp", 50))
+        except (ValueError, TypeError):
+            hp = 50.0
         severity = "WARNING" if hp < 50 else "NUDGE"
 
         # 1. Fetch line from cache or canned fallback
@@ -245,11 +247,18 @@ Return JSON: {{"text": "..."}}
         except Exception as e:
             logger.warning("Background context line generation failed for cue '%s': %s", cue, e)
 
-    async def generate_session_summary(self, session_stats: Dict[str, Any]) -> str:
+    async def generate_session_summary(self, session_stats: Optional[Dict[str, Any]] = None) -> str:
         """Generate a 3-sentence end-of-session ergonomic summary."""
+        stats = session_stats if isinstance(session_stats, dict) else {}
         if not self.client:
-            avg_strain = session_stats.get("avg_strain", 0.3)
-            min_hp = session_stats.get("min_hp", 60)
+            try:
+                avg_strain = float(stats.get("avg_strain", 0.3) or 0.3)
+            except (ValueError, TypeError):
+                avg_strain = 0.3
+            try:
+                min_hp = int(stats.get("min_hp", 60) or 60)
+            except (ValueError, TypeError):
+                min_hp = 60
             return (
                 f"You completed a focused ergonomic session with a minimum pet HP of {min_hp}%. "
                 f"Your average strain was kept at {avg_strain:.2f}, avoiding severe musculoskeletal stress. "
