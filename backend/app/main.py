@@ -200,7 +200,7 @@ async def dispatch_grok_bot(session_id: str, webhook_url: Optional[str] = None):
         session_id=session_id,
         summary_text=summary_resp["summary"],
         stats=summary_resp["stats"],
-        webhook_url=webhook_url or settings.GROK_BOT_WEBHOOK_URL,
+        webhook_url=webhook_url or settings.GROK_WEBHOOK_URL,
     )
     if sent:
         webhook_cooldowns[session_id] = now

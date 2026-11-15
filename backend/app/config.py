@@ -42,7 +42,8 @@ class Settings(BaseModel):
     SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "ergogotchi_local.db")
     
     # Grok Bot / SpaceXSI Webhook
-    GROK_WEBHOOK_URL: str = os.getenv("GROK_WEBHOOK_URL", "")
+    GROK_WEBHOOK_URL: str = os.getenv("GROK_WEBHOOK_URL", os.getenv("GROK_BOT_WEBHOOK_URL", ""))
+    GROK_BOT_WEBHOOK_URL: str = os.getenv("GROK_BOT_WEBHOOK_URL", os.getenv("GROK_WEBHOOK_URL", ""))
     
     # Telemetry buffer & batching
     FLUSH_INTERVAL_SECONDS: float = 1.0
