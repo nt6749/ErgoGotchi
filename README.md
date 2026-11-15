@@ -61,7 +61,7 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
                                                   │
                                                   │ WebSockets (WSS)
                                                   ▼
-     ┌────────────────────── CLOUD / BACKEND (VULTR) ──────────────────────┐
+     ┌────────────────────── CLOUD / BACKEND (Docker) ──────────────────────┐
      │                                                                     │
      │                   FastAPI WebSocket & Relay Server                  │
      │                                    │                                │
@@ -104,7 +104,6 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
 | ♊ **Best Use of Gemini API** | MLH Swag Kits & Honors | Gemini powers the pet’s personality engine with structured JSON responses, serving snappy, context-aware roasts and clinically grounded micro-stretch biomechanical cues. |
 | 🐅 **Best Use of Tiger Data** | Stream Deck Mini | Ingests continuous 1 Hz telemetry into PostgreSQL hypertables; leverages `timescaledb.continuous` 1-minute materialized views (`ergo_1min`) and `LAG()` window functions to compute real-time strain velocity. |
 | 🎮 **Best Gaming** | Gaming Track | Virtual pet survival gameplay: 0–100 HP decay curve, level-ups, posture discipline XP, and death/revival state mechanics. |
-| ☁️ **Best Use of Vultr** | IoT Kit / Cloud Awards | Full Docker Compose deployment blueprint provisioning TimescaleDB and the FastAPI telemetry service on Vultr High-Frequency Compute. |
 | 🚀 **SpaceXSI A-Team** | Mechanical Keyboards | Automated Grok Bot webhook service generating personal, opt-in daily focus and posture summaries in Discord/Slack. |
 
 ---
