@@ -20,6 +20,9 @@ from app.config import settings
 from app.gemini.engine import gemini_engine, STRETCH_INSTRUCTIONS, CANNED_LINES
 from app.db.database import db
 
+# Enable console logging for backend components
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
 # Setup dedicated manual trace logger
 TRACE_LOG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tests", "manual_trace.log"))
 os.makedirs(os.path.dirname(TRACE_LOG_PATH), exist_ok=True)
@@ -371,17 +374,19 @@ async def run_diagnostics(scenario: dict):
     sev_color = RED if severity == "WARNING" else YELLOW
 
     # --- Section D: AI Persona Response & Dispatch ---
+    context_data = {
+        "hp": current_hp,
+        "worst_signal": cue_signal,
+        "strain_index": strain_index,
+        "blink_rate_1m": signals.get("blink_rate_1m", 12),
+        "minutes_in_session": 45
+    }
+
     pool_size = len(gemini_engine.cache.get(cue, []))
     resp = await gemini_engine.get_intervention(
         request_id=req_id,
         reason=reason,
-        context={
-            "hp": current_hp,
-            "worst_signal": cue_signal,
-            "strain_index": strain_index,
-            "blink_rate_1m": signals.get("blink_rate_1m", 12),
-            "minutes_in_session": 45
-        }
+        context=context_data
     )
     elapsed_ms = (time.time() - t0) * 1000
 
@@ -405,6 +410,28 @@ async def run_diagnostics(scenario: dict):
     print("-" * 66 + "\n")
 
 
+async def test_live_gemini():
+    print(f"\n{BOLD}{CYAN}=== Testing Live Gemini API Connection ({settings.GEMINI_MODEL}) ==={RESET}")
+    if not gemini_engine.client:
+        print(f"{RED}Gemini client is not initialized. Please verify GEMINI_API_KEY in .env.{RESET}")
+        return
+    print(f"Querying model '{settings.GEMINI_MODEL}' for live session summary...")
+    t0 = time.time()
+    try:
+        summary = await gemini_engine.generate_session_summary({
+            "avg_strain": 0.28,
+            "min_hp": 80,
+            "minutes": 45,
+            "avg_blink_rate": 14
+        })
+        ms = (time.time() - t0) * 1000
+        print(f"{GREEN}✓ Gemini {settings.GEMINI_MODEL} responded in {ms:.0f}ms!{RESET}")
+        print(f"{BOLD}\"{summary}\"{RESET}")
+    except Exception as e:
+        print(f"{RED}✗ Live Gemini API call failed: {e}{RESET}")
+    print("-" * 66 + "\n")
+
+
 def view_recent_traces():
     print(f"\n{BOLD}{CYAN}=== Recent Diagnostic Trace Log (last 15 entries) ==={RESET}")
     if not os.path.exists(TRACE_LOG_PATH):
@@ -420,19 +447,34 @@ def view_recent_traces():
 async def main_loop():
     print_banner()
 
+    if gemini_engine.client:
+        print(f"{CYAN}⏳ Pre-fetching 4 fresh Gemini lines for every posture cue...{RESET}")
+        try:
+            await gemini_engine.warm_cache(count=4)
+            gemini_counts = {k: len([x for x in v if x not in CANNED_LINES.get(k, [])]) for k, v in gemini_engine.cache.items()}
+            print(f"{GREEN}✓ Prefetched successfully! Fresh Gemini lines ready in cache: {gemini_counts}{RESET}\n")
+        except Exception as e:
+            print(f"{YELLOW}⚠️ Prefetch failed ({e}). Defaulting to built-in canned responses.{RESET}\n")
+
+        # Launch periodic background refill (adds 2 fresh Gemini lines every 3 minutes)
+        asyncio.create_task(gemini_engine.periodic_refill_loop(interval_seconds=180, count_per_cue=2))
+
     while True:
         print(f"{BOLD}Select an action or posture situation to simulate:{RESET}")
         for k, v in PRESET_SCENARIOS.items():
             print(f"  [{k}] {v['title']}")
         print("  [8] Custom Input (Type your own Biometrics & HP)")
+        print("  [G] Test Live Gemini 3.8 Flash Connection")
         print("  [L] View Diagnostic Log History")
         print("  [0] Exit")
 
-        choice = input(f"\n{BOLD}Enter choice [0-8, L]: {RESET}").strip().upper()
+        choice = input(f"\n{BOLD}Enter choice [0-8, G, L]: {RESET}").strip().upper()
 
         if choice == "0":
             print("Exiting ErgoGotchi CLI. Keep sitting upright!")
             break
+        elif choice == "G":
+            await test_live_gemini()
         elif choice in PRESET_SCENARIOS:
             await run_diagnostics(PRESET_SCENARIOS[choice])
         elif choice == "8":

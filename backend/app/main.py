@@ -55,7 +55,8 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting %s...", settings.APP_NAME)
     await db.connect()
-    asyncio.create_task(gemini_engine.warm_cache())
+    asyncio.create_task(gemini_engine.warm_cache(count=4))
+    refiller = asyncio.create_task(gemini_engine.periodic_refill_loop(interval_seconds=180, count_per_cue=2))
     flusher = asyncio.create_task(flush_buffer_task())
     try:
         yield
@@ -63,8 +64,13 @@ async def lifespan(app: FastAPI):
         # Shutdown
         logger.info("Shutting down %s...", settings.APP_NAME)
         flusher.cancel()
+        refiller.cancel()
         try:
             await flusher
+        except asyncio.CancelledError:
+            pass
+        try:
+            await refiller
         except asyncio.CancelledError:
             pass
 

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import random
 import re
 from typing import Dict, List, Optional, Any
@@ -29,8 +30,8 @@ STRETCH_INSTRUCTIONS: Dict[str, str] = {
     "NONE": "Keep up the great posture!"
 }
 
-# Rich clinical canned fallback lines (~75 lines for high variety offline / quota exhausted)
-CANNED_LINES: Dict[str, List[str]] = {
+# Fallback responses in case canned_lines.json is missing or unreadable
+_DEFAULT_FALLBACK_LINES: Dict[str, List[str]] = {
     "CHIN_TUCK": [
         "You're folding like a lawn chair. Give your neck a break.",
         "Your chin is leading the way into your screen. Pull it back.",
@@ -111,6 +112,22 @@ CANNED_LINES: Dict[str, List[str]] = {
     ]
 }
 
+def _load_canned_lines() -> Dict[str, List[str]]:
+    """Load default canned persona lines from canned_lines.json with hardcoded fallback."""
+    json_path = os.path.join(os.path.dirname(__file__), "canned_lines.json")
+    try:
+        if os.path.exists(json_path):
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and data:
+                    return data
+    except Exception as e:
+        logger.warning("Could not read canned_lines.json (%s), using internal fallback.", e)
+    return _DEFAULT_FALLBACK_LINES
+
+# Rich clinical canned fallback lines (~75 lines for high variety offline / quota exhausted)
+CANNED_LINES: Dict[str, List[str]] = _load_canned_lines()
+
 class GeminiPersonaEngine:
     def __init__(self):
         self.client = None
@@ -136,14 +153,67 @@ class GeminiPersonaEngine:
         except Exception as e:
             logger.warning("Could not initialise Google GenAI SDK (%s). Running with canned fallbacks.", e)
 
-    async def warm_cache(self):
-        """Pre-fetch 8 fresh creative lines per cue at startup to ensure 0ms response latency."""
+    def _call_gemini_api(self, prompt: str, json_mode: bool = True) -> str:
+        """Call Gemini via google-genai models.generate_content or interactions.create."""
+        if not self.client:
+            raise RuntimeError("Gemini client not initialized")
+
+        # 1. Try models.generate_content (standard google-genai SDK)
+        if hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
+            from google.genai import types
+            config = types.GenerateContentConfig(response_mime_type="application/json") if json_mode else None
+            res = self.client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=config
+            )
+            return getattr(res, "text", "") or ""
+
+        # 2. Try interactions.create (Interactions API)
+        if hasattr(self.client, "interactions") and hasattr(self.client.interactions, "create"):
+            fmt = {"type": "text", "mime_type": "application/json"} if json_mode else None
+            kwargs = {"model": settings.GEMINI_MODEL, "input": prompt}
+            if fmt:
+                kwargs["response_format"] = fmt
+            res = self.client.interactions.create(**kwargs)
+            return getattr(res, "output_text", getattr(res, "text", "")) or ""
+
+        raise RuntimeError("No compatible Gemini API method found on client")
+
+    async def warm_cache(self, count: int = 4):
+        """Pre-fetch fresh creative lines per cue in parallel to ensure 0ms response latency."""
         if not self.client:
             return
 
-        logger.info("Pre-warming Gemini speech line cache...")
-        for cue in ["CHIN_TUCK", "SHOULDER_ROLL", "SIT_BACK", "LOOK_AWAY", "STAND_UP"]:
-            asyncio.create_task(self._fetch_batch_lines(cue, count=4))
+        logger.info("Pre-warming Gemini speech line cache (%d lines per cue)...", count)
+        cues = ["CHIN_TUCK", "SHOULDER_ROLL", "SIT_BACK", "LOOK_AWAY", "STAND_UP"]
+        tasks = [self._fetch_batch_lines(cue, count=count) for cue in cues]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info("Gemini cache pre-warming complete.")
+
+    async def periodic_refill_loop(self, interval_seconds: int = 180, count_per_cue: int = 2):
+        """Continuously populate and refresh the pool with fresh creative Gemini lines in the background."""
+        if not self.client:
+            return
+
+        logger.info(
+            "Starting Gemini periodic pool refill task (every %ds, +%d lines per cue)...",
+            interval_seconds,
+            count_per_cue
+        )
+        cues = ["CHIN_TUCK", "SHOULDER_ROLL", "SIT_BACK", "LOOK_AWAY", "STAND_UP"]
+        while True:
+            try:
+                await asyncio.sleep(interval_seconds)
+                # Fetch fresh lines across cues in parallel
+                tasks = [self._fetch_batch_lines(cue, count=count_per_cue) for cue in cues]
+                await asyncio.gather(*tasks, return_exceptions=True)
+                logger.debug("Periodic Gemini cache refill cycle completed.")
+            except asyncio.CancelledError:
+                logger.info("Gemini periodic refill loop cancelled.")
+                break
+            except Exception as e:
+                logger.warning("Periodic Gemini cache refill cycle skipped: %s", e)
 
     async def _fetch_batch_lines(self, cue: str, count: int = 4):
         """Query Gemini for creative one-liner jokes corresponding to a cue."""
@@ -164,15 +234,8 @@ Rules:
 """
         try:
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.interactions.create(
-                    model=settings.GEMINI_MODEL,
-                    input=prompt,
-                    response_format={"type": "text", "mime_type": "application/json"}
-                )
-            )
-            data = _safe_json_loads(response.output_text)
+            raw_text = await loop.run_in_executor(None, lambda: self._call_gemini_api(prompt, json_mode=True))
+            data = _safe_json_loads(raw_text)
             lines = data.get("lines", [])
             cue_cache = self.cache.setdefault(cue, [])
             for line in lines:
@@ -281,15 +344,8 @@ Write ONE short, witty, affectionate comic line (max 85 characters, 1 sentence, 
 Return JSON: {{"text": "..."}}
 """
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.interactions.create(
-                    model=settings.GEMINI_MODEL,
-                    input=prompt,
-                    response_format={"type": "text", "mime_type": "application/json"}
-                )
-            )
-            data = _safe_json_loads(response.output_text)
+            raw_text = await loop.run_in_executor(None, lambda: self._call_gemini_api(prompt, json_mode=True))
+            data = _safe_json_loads(raw_text)
             new_text = data.get("text", "").strip()
             if new_text and len(new_text) <= 90:
                 cue_cache = self.cache.setdefault(cue, [])
@@ -329,14 +385,8 @@ Tone: Warm, motivating, ergonomic coach. Max 3 sentences. No bullet points.
 """
         try:
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.interactions.create(
-                    model=settings.GEMINI_MODEL,
-                    input=prompt
-                )
-            )
-            return response.output_text.strip()
+            raw_text = await loop.run_in_executor(None, lambda: self._call_gemini_api(prompt, json_mode=False))
+            return raw_text.strip()
         except Exception as e:
             logger.warning("Gemini session summary failed: %s", e)
             return "Great focus session! Your posture discipline kept ErgoGotchi healthy and energized."
