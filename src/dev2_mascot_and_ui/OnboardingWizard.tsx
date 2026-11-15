@@ -561,17 +561,17 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
             </p>
           </div>
 
-          {/* Integration 1: Gemini 2.5 API Key */}
+          {/* Integration 1: Gemini 3.8 Flash API Key */}
           <div className="w-full bg-slate-800/70 border border-slate-700/80 rounded-2xl p-3 text-left space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm">✨</span>
-                <span className="text-xs font-semibold text-slate-200">Gemini 2.5 API Key</span>
+                <span className="text-xs font-semibold text-slate-200">Gemini 3.8 Flash API Key</span>
               </div>
               <div className="flex items-center gap-1.5">
                 {configStatus?.gemini_configured && (
                   <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-medium">
-                    ✓ Active via .env
+                    ✓ Active: {configStatus.gemini_model || 'gemini-3.8-flash'}
                   </span>
                 )}
                 <a

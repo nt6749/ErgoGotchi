@@ -1381,13 +1381,13 @@ GROUP BY bucket, session_id;`}</pre>
                 </label>
               </div>
 
-              {/* Gemini 2.5 AI Voice Lines & Personality Card */}
+              {/* Gemini 3.8 Flash AI Voice Lines & Personality Card */}
               <div className={`${CARD} p-5 space-y-4`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-lg">✨</span>
                     <div>
-                      <h3 className="font-bold text-base">Gemini 2.5 AI Personality & Voice Lines</h3>
+                      <h3 className="font-bold text-base">Gemini 3.8 Flash AI Personality & Voice Lines</h3>
                       <p className={`text-xs ${MUTED}`}>Powers adaptive speech cues and continuous ergonomic session summaries</p>
                     </div>
                   </div>
@@ -1397,7 +1397,7 @@ GROUP BY bucket, session_id;`}</pre>
                       : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
                   }`}>
                     {backendConfigStatus?.gemini_configured
-                      ? `ACTIVE (${backendConfigStatus.gemini_model || 'gemini-2.5-flash'})`
+                      ? `ACTIVE (${backendConfigStatus.gemini_model || 'gemini-3.8-flash'})`
                       : geminiApiKeyInput
                       ? 'CONFIGURED'
                       : 'OFFLINE EDGE MODE'}
