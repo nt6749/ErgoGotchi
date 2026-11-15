@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { DifficultyLevel, PetState } from '../types';
+import { DifficultyLevel, PetState, UpdateInfo, UpdateProgress } from '../types';
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
 import { MyDuck } from './MyDuck';
 import { CameraScreen } from './CameraScreen';
@@ -103,6 +103,16 @@ interface DashboardProps {
   isPresent?: boolean;
   isCalibrating?: boolean;
   calibrationProgress?: number;
+
+  // Auto-Updates & System Startup
+  appVersion?: string;
+  updateInfo?: UpdateInfo | null;
+  updateProgress?: UpdateProgress | null;
+  isUpdating?: boolean;
+  onCheckForUpdates?: () => Promise<UpdateInfo>;
+  onTriggerUpdate?: (asset?: { name: string; downloadUrl: string; size?: number } | null) => void;
+  launchOnStartup?: boolean;
+  onToggleLaunchOnStartup?: (enabled: boolean) => void;
 }
 
 type TabId = 'analytics' | 'myduck' | 'quests' | 'tigerdata' | 'demo' | 'settings';
@@ -112,7 +122,7 @@ const TABS: Array<{ id: TabId; icon: string; label: string }> = [
   { id: 'quests', icon: '🎯', label: 'Quests' },
   { id: 'tigerdata', icon: '🐅', label: 'Tiger Data' },
   { id: 'demo', icon: '🎬', label: 'Demo' },
-  { id: 'settings', icon: '⚙️', label: 'Difficulty' },
+  { id: 'settings', icon: '⚙️', label: 'Settings' },
 ];
 
 /** A row of choices where the current one is shown as "on". */
@@ -174,7 +184,63 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isPresent = true,
   isCalibrating = false,
   calibrationProgress = 0,
+  appVersion = '1.0.1',
+  updateInfo = null,
+  updateProgress = null,
+  isUpdating = false,
+  onCheckForUpdates,
+  onTriggerUpdate,
+  launchOnStartup = false,
+  onToggleLaunchOnStartup,
 }) => {
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.autoCheckUpdates') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const [autoInstallUpdates, setAutoInstallUpdates] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.autoInstallUpdates') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [checkResult, setCheckResult] = useState<UpdateInfo | null>(updateInfo || null);
+
+  useEffect(() => {
+    if (updateInfo) setCheckResult(updateInfo);
+  }, [updateInfo]);
+
+  const handleToggleAutoCheck = (checked: boolean) => {
+    setAutoCheckUpdates(checked);
+    try {
+      localStorage.setItem('ergogotchi.autoCheckUpdates', String(checked));
+    } catch {}
+  };
+
+  const handleToggleAutoInstall = (checked: boolean) => {
+    setAutoInstallUpdates(checked);
+    try {
+      localStorage.setItem('ergogotchi.autoInstallUpdates', String(checked));
+    } catch {}
+  };
+
+  const handleManualCheckClick = async () => {
+    setCheckingUpdates(true);
+    try {
+      if (onCheckForUpdates) {
+        const res = await onCheckForUpdates();
+        setCheckResult(res);
+      }
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
   const [localDifficulty, setLocalDifficulty] = useState<DifficultyLevel>(() => {
     try {
       const saved = localStorage.getItem('ergogotchi.difficulty');
@@ -724,6 +790,149 @@ GROUP BY bucket, session_id;`}</pre>
                     </p>
                   </button>
                 </div>
+              </div>
+
+              {/* ErgoGotchi Auto-Updates Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🔄</span>
+                    <div>
+                      <h3 className="font-bold text-base">ErgoGotchi Updates</h3>
+                      <p className={`text-xs ${MUTED}`}>Check for updates and configure automated version releases</p>
+                    </div>
+                  </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-mono font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    Installed: v{appVersion || '1.0.1'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  {/* Toggle 1: Auto-check on startup */}
+                  <label className={`${PANEL} p-3 rounded-xl flex items-start gap-3 cursor-pointer hover:border-slate-600 transition`}>
+                    <input
+                      type="checkbox"
+                      checked={autoCheckUpdates}
+                      onChange={(e) => handleToggleAutoCheck(e.target.checked)}
+                      className="mt-1 accent-yellow-400 w-4 h-4 cursor-pointer"
+                    />
+                    <div>
+                      <div className="text-xs font-semibold text-[var(--ink)]">Check for updates on startup</div>
+                      <div className={`text-[11px] ${MUTED}`}>
+                        Automatically polls GitHub Releases when ErgoGotchi opens.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Toggle 2: Auto-install before launch */}
+                  <label className={`${PANEL} p-3 rounded-xl flex items-start gap-3 cursor-pointer hover:border-slate-600 transition`}>
+                    <input
+                      type="checkbox"
+                      checked={autoInstallUpdates}
+                      onChange={(e) => handleToggleAutoInstall(e.target.checked)}
+                      className="mt-1 accent-yellow-400 w-4 h-4 cursor-pointer"
+                    />
+                    <div>
+                      <div className="text-xs font-semibold text-[var(--ink)]">Auto-install updates before launch</div>
+                      <div className={`text-[11px] ${MUTED}`}>
+                        Installs new releases automatically with a download progress indicator window.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Manual Check Button & Result */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[var(--line)]">
+                  <button
+                    type="button"
+                    onClick={handleManualCheckClick}
+                    disabled={checkingUpdates || isUpdating}
+                    className={`${BUTTON_PRIMARY} flex items-center gap-2`}
+                  >
+                    <span>{checkingUpdates ? '⏳' : '🔍'}</span>
+                    <span>{checkingUpdates ? 'Checking GitHub...' : 'Check for Updates Now'}</span>
+                  </button>
+
+                  {checkResult && (
+                    <div className="text-xs font-semibold">
+                      {checkResult.updateAvailable ? (
+                        <span className="text-cyan-400 flex items-center gap-1.5">
+                          <span>⚡</span> Update {checkResult.latestVersion} is available!
+                        </span>
+                      ) : checkResult.error ? (
+                        <span className="text-rose-400">⚠️ {checkResult.error}</span>
+                      ) : (
+                        <span className="text-emerald-400">✓ ErgoGotchi is up to date!</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Update Available Highlight Card */}
+                {checkResult?.updateAvailable && (
+                  <div className="p-4 rounded-xl bg-cyan-950/40 border border-cyan-500/50 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-cyan-300 uppercase tracking-wider">
+                          🚀 New Version {checkResult.latestVersion} Available
+                        </h4>
+                        <p className={`text-[11px] ${MUTED}`}>
+                          {checkResult.releaseName || 'Bug fixes, performance improvements & new pet animations'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onTriggerUpdate?.(checkResult.asset)}
+                        disabled={isUpdating}
+                        className={`${BUTTON_PRIMARY} !bg-cyan-400 !text-slate-950 !border-cyan-400 font-bold`}
+                      >
+                        {isUpdating ? 'Downloading...' : 'Update & Restart Now'}
+                      </button>
+                    </div>
+                    {checkResult.releaseNotes && (
+                      <div className="text-[11px] text-slate-300 bg-slate-900/60 p-2.5 rounded-lg max-h-24 overflow-y-auto font-mono whitespace-pre-wrap select-text">
+                        {checkResult.releaseNotes}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Launch at System Startup Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🚀</span>
+                    <div>
+                      <h3 className="font-bold text-base">Launch at System Startup</h3>
+                      <p className={`text-xs ${MUTED}`}>Configure ErgoGotchi to start automatically when your PC boots</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-mono font-semibold ${
+                    launchOnStartup
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                  }`}>
+                    {launchOnStartup ? 'ENABLED' : 'DISABLED'}
+                  </span>
+                </div>
+
+                <label className={`${PANEL} p-3.5 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-600 transition`}>
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-semibold text-[var(--ink)]">
+                      Start ErgoGotchi automatically when you log into your computer
+                    </div>
+                    <div className={`text-[11px] ${MUTED}`}>
+                      Launches your pet docked in the screen corner so posture feedback is ready from your first line of code.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={launchOnStartup}
+                    onChange={(e) => onToggleLaunchOnStartup?.(e.target.checked)}
+                    className="accent-yellow-400 w-5 h-5 cursor-pointer ml-4"
+                  />
+                </label>
               </div>
 
               {/* Dev 1 Biometric Safeguards Overview */}

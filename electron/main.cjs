@@ -10,6 +10,12 @@ const { spawn } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const { startActivityWatcher } = require('./activityWatcher.cjs');
+const {
+  checkForUpdates,
+  downloadAndInstallUpdate,
+  getLoginItemSettings,
+  setLoginItemSettings,
+} = require('./updater.cjs');
 
 let petWindow = null;
 let dashboardWindow = null;
@@ -165,6 +171,17 @@ function createPetWindow() {
       {
         label: '📊 Open Companion Dashboard',
         click: () => createDashboardWindow(),
+      },
+      {
+        label: '🔄 Check for Updates...',
+        click: () => {
+          createDashboardWindow();
+          setTimeout(() => {
+            if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+              dashboardWindow.webContents.send('menu-check-updates');
+            }
+          }, 500);
+        },
       },
       {
         label: '⚡ Toggle Demo Mode (D)',
@@ -356,6 +373,34 @@ ipcMain.on('wizard-active', (event, active) => {
   isWizardActive = !!active;
 });
 
+// Auto-Updater & System Startup IPC Handlers
+ipcMain.handle('check-for-updates', async () => {
+  return await checkForUpdates();
+});
+
+ipcMain.handle('download-and-install-update', async (event, asset) => {
+  return await downloadAndInstallUpdate(asset, (progress) => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      petWindow.webContents.send('update-download-progress', progress);
+    }
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('update-download-progress', progress);
+    }
+  });
+});
+
+ipcMain.handle('get-login-item-settings', () => {
+  return getLoginItemSettings();
+});
+
+ipcMain.handle('set-login-item-settings', (event, openAtLogin) => {
+  return setLoginItemSettings(openAtLogin);
+});
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
 app.whenReady().then(async () => {
   const isAlive = await checkBackendAlive();
   if (!isAlive) {
@@ -363,6 +408,24 @@ app.whenReady().then(async () => {
   }
 
   createPetWindow();
+
+  // Background check for GitHub updates on app startup (after 3 seconds)
+  setTimeout(async () => {
+    try {
+      const info = await checkForUpdates();
+      if (info && info.updateAvailable) {
+        console.log(`[ErgoGotchi AutoUpdater] Update available on startup: ${info.latestVersion}`);
+        if (petWindow && !petWindow.isDestroyed()) {
+          petWindow.webContents.send('update-available', info);
+        }
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('update-available', info);
+        }
+      }
+    } catch (e) {
+      console.warn('[ErgoGotchi AutoUpdater] Startup update check failed:', e);
+    }
+  }, 3000);
 
   stopActivityWatcher = startActivityWatcher((activity) => {
     lastActivity = activity;

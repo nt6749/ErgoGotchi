@@ -20,4 +20,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setWizardActive: (active) => ipcRenderer.send('wizard-active', active),
   centerPet: (width, height) => ipcRenderer.send('pet-center', { width, height }),
   dockPet: () => ipcRenderer.send('pet-dock-corner'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadAndInstallUpdate: (asset) => ipcRenderer.invoke('download-and-install-update', asset),
+  onUpdateProgress: (callback) => ipcRenderer.on('update-download-progress', (event, data) => callback(data)),
+  onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (event, data) => callback(data)),
+  getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
+  setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('set-login-item-settings', openAtLogin),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
 });
