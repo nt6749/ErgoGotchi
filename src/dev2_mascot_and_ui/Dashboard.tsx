@@ -440,6 +440,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </header>
 
+      {/* Update Available Notification Banner on Main Dashboard */}
+      {checkResult?.updateAvailable && !isUpdating && (
+        <div className="bg-gradient-to-r from-cyan-500/15 via-sky-500/15 to-blue-500/15 border-b border-cyan-400/40 px-5 py-2.5 flex flex-wrap items-center justify-between gap-3 backdrop-blur-sm animate-fade-in select-none">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl animate-pulse select-none">⚡</span>
+            <div>
+              <span className="text-xs font-bold text-[var(--ink)] flex items-center gap-2">
+                <span>ErgoGotchi {checkResult.latestVersion} is available!</span>
+                <span className="text-[10px] bg-cyan-400/20 text-cyan-600 dark:text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-400/30 font-bold uppercase">
+                  New Release
+                </span>
+              </span>
+              <p className={`text-[11px] ${MUTED}`}>
+                Click to download and restart ErgoGotchi with the latest features.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onTriggerUpdate?.(checkResult.asset)}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-cyan-400 hover:bg-cyan-300 text-slate-950 transition active:scale-95 shadow-md flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <span>Update & Restart</span>
+              <span>🚀</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCheckResult((prev) => (prev ? { ...prev, updateAvailable: false } : null))}
+              className="text-xs text-[var(--muted)] hover:text-[var(--ink)] p-1 rounded-lg hover:bg-[var(--chip)] transition cursor-pointer"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Bar 2: aesthetic pill tabs */}
       <nav className="flex flex-wrap items-center gap-1.5 px-5 py-2.5 bg-[var(--surface)] border-b border-[var(--line)]">
         {TABS.map((tab) => {

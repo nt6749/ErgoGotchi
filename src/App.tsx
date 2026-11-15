@@ -853,50 +853,6 @@ export const App: React.FC = () => {
     ? (forcedState === 'THRIVING' ? 95 : forcedState === 'NEUTRAL' ? 75 : forcedState === 'SLOUCHING' ? 45 : 15)
     : scoringState.hp;
 
-  // Floating Update Notification Banner (when an update is found)
-  const updateBanner = updateInfo?.updateAvailable && !showUpdateModal && (
-    <div
-      {...captureMouse}
-      className={`fixed top-2 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-[316px] bg-slate-900/98 border-2 border-cyan-400 rounded-2xl p-2.5 shadow-[0_10px_25px_-5px_rgba(34,211,238,0.3)] backdrop-blur-md flex flex-col gap-2 select-none animate-pop-spring ${
-        isPetWindow ? '' : 'sm:max-w-md sm:flex-row sm:items-center sm:justify-between sm:p-3'
-      }`}
-      style={{ WebkitAppRegion: 'no-drag' } as any}
-    >
-      <div className="flex items-start justify-between gap-1.5 flex-1 min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-lg select-none text-cyan-400 animate-pulse">⚡</span>
-          <div className="text-left text-xs leading-tight min-w-0">
-            <span className="font-bold text-white block">
-              Update {updateInfo.latestVersion} Available!
-            </span>
-            <p className="text-[10px] text-slate-300">
-              Click to install update & restart.
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setUpdateInfo((prev) => (prev ? { ...prev, updateAvailable: false } : null))}
-          className="text-slate-400 hover:text-slate-200 text-xs p-1 -mr-1 -mt-1 cursor-pointer transition"
-          title="Dismiss for now"
-        >
-          ✕
-        </button>
-      </div>
-
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => handleTriggerUpdate()}
-          className="flex-1 px-3 py-1.5 rounded-xl text-xs font-black bg-cyan-400 hover:bg-cyan-300 text-slate-950 transition active:scale-95 shadow-md flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-        >
-          <span>Update & Restart</span>
-          <span>🚀</span>
-        </button>
-      </div>
-    </div>
-  );
-
   // Fullscreen / Floating Update Progress Modal (when downloading/installing)
   const updateModal = showUpdateModal && (
     <div
@@ -955,7 +911,6 @@ export const App: React.FC = () => {
 
     return (
       <div className="w-screen h-screen bg-transparent flex flex-col items-center justify-end overflow-hidden select-none pb-1">
-        {updateBanner}
         {updateModal}
         <MascotSprite
           state={activeState}
@@ -991,7 +946,6 @@ export const App: React.FC = () => {
     return (
       <div data-theme={theme} className={`h-screen font-sans select-none overflow-hidden ${PAGE}`}>
         {wizardOverlay}
-        {updateBanner}
         {updateModal}
         <Dashboard
           hp={activeHp}
@@ -1070,7 +1024,6 @@ export const App: React.FC = () => {
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center relative z-10 w-full p-4">
-        {updateBanner}
         {updateModal}
         {wizardOverlay}
           <div className="relative w-full max-w-4xl min-h-[500px] rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
