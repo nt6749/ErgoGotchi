@@ -29,42 +29,85 @@ STRETCH_INSTRUCTIONS: Dict[str, str] = {
     "NONE": "Keep up the great posture!"
 }
 
-# 15 high-quality canned fallback lines (guarantees instantaneous response offline / without API key)
+# Rich clinical canned fallback lines (~75 lines for high variety offline / quota exhausted)
 CANNED_LINES: Dict[str, List[str]] = {
     "CHIN_TUCK": [
         "You're folding like a lawn chair. Give your neck a break.",
         "Your chin is leading the way into your screen. Pull it back.",
         "I'm melting into a puddle down here. Retract that chin!",
-        "Turtle mode detected. Let's tuck that chin back."
+        "Turtle mode detected. Let's tuck that chin back.",
+        "Are you trying to smell the code? Pull your head back.",
+        "My spine aches watching you inch toward the pixels. Chin tuck time.",
+        "Head forward, pet HP backward. Retract that cranium.",
+        "You look like a peering meerkat. Slide that head back into alignment.",
+        "Cervical vertebrae distress call received. Double chin engaged!",
+        "Your neck is working overtime for free. Pull it straight back.",
+        "Stop inspecting individual pixels with your nose. Tuck your chin.",
+        "Gravity called, it wants your posture back. Chin tuck for five seconds."
     ],
     "SHOULDER_ROLL": [
         "Your shoulders are trying to eat your ears. Roll them down.",
         "That hunch is turning me into a deflated balloon. Roll 'em back.",
         "Tension alert: drop those shoulders before my HP drops to zero.",
-        "Shoulders up, HP down. Roll them back and breathe."
+        "Shoulders up, HP down. Roll them back and breathe.",
+        "You're wearing your shoulders as earrings. Roll them back down.",
+        "Release the keyboard grip. Roll those shoulders back five times.",
+        "Hunchback mode deactivated. Let's drop those traps.",
+        "My squishy body is cramping. Drop and roll both shoulders.",
+        "You're clenching like you're debugging production. Roll 'em back.",
+        "Shoulder blades together, chest open. Breathe and relax.",
+        "Those shoulders are halfway up your neck. Drop them down.",
+        "Uncurl that upper back before I turn into a permanent pancake."
     ],
     "SIT_BACK": [
         "You're inching into the screen. Slide your hips to the back.",
         "Gravity is winning. Reclaim your chair backrest.",
         "Leaning tower of programmer. Push yourself back.",
-        "Sit back into your chair, we're losing altitude down here."
+        "Sit back into your chair, we're losing altitude down here.",
+        "Your chair has a backrest for a reason. Use it!",
+        "Screen tractor beam detected. Slide those hips back.",
+        "You're tilting like a sailboat in a storm. Center yourself.",
+        "Back up from the glass, human. Reclaim your lumbar support.",
+        "Hips all the way back into the chair seat. We need stability.",
+        "You're hovering over the desk. Lean back and let the chair work.",
+        "Center of gravity compromised. Slide your pelvis back.",
+        "Recline into comfort. Your lower spine will thank you."
     ],
     "LOOK_AWAY": [
         "Your eyes haven't blinked in forever. Look at a distant wall.",
         "Blink check! Look away before both of us turn into stone.",
         "Screen stare overload. Find something 20 feet away for 20s.",
-        "Give your retinas a breather. Glance out the window."
+        "Give your retinas a breather. Glance out the window.",
+        "Stare down a distant horizon. Give your eye muscles a break.",
+        "The screen will still be here in 20 seconds. Look across the room.",
+        "Are your corneas dried out yet? Look at something 20 feet away.",
+        "Optical fatigue warning: twenty feet, twenty seconds, right now.",
+        "Blink those eyelids, you're not an owl. Focus on the far wall.",
+        "Rest those pupils. Glare at the ceiling or out the window.",
+        "Blue light overdose in progress. Look away and blink five times.",
+        "Give your optic nerve a holiday. Find a distant object to admire."
     ],
     "STAND_UP": [
         "Marathon session detected! Stand up and stretch your legs.",
         "We've been glued to this desk for too long. Stand up!",
         "My pixels are cramping. Stand up and walk for one minute.",
-        "Desk hibernation time is up. Stand up and stretch."
+        "Desk hibernation time is up. Stand up and stretch.",
+        "Circulation check! Rise from your throne and take a lap.",
+        "You've bonded with that chair at a molecular level. Stand up!",
+        "One minute walking break. The code will compile while you're up.",
+        "Leg muscles requesting permission to exist. Stand tall!",
+        "Break the sedentary spell. Stand, stretch, and grab some water.",
+        "Desk gravity has trapped you for an hour. Stand and shake it off.",
+        "Get on your feet for sixty seconds. Your pet demands movement!",
+        "Unfold those hip flexors. Stand up and take a quick victory lap."
     ],
     "NONE": [
         "Upright and thriving! Keep this posture going.",
         "Pure ergonomic perfection. I feel unstoppable!",
-        "Flawless spine alignment. We're cruising now."
+        "Flawless spine alignment. We're cruising now.",
+        "Spine of steel! I am energized and glowing.",
+        "Posture royalty detected. Bobi approves this alignment!",
+        "Zero strain, maximum flow. We're an unstoppable duo."
     ]
 }
 
