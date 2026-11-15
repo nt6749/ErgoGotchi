@@ -6,7 +6,37 @@
 
 import { BaselineCalibration, BiometricSignals } from '../types';
 
+// Must match the installed @mediapipe/tasks-vision version (JS and WASM must agree)
+const MEDIAPIPE_VERSION = '0.10.35';
+const MEDIAPIPE_TIMEOUT_MS = 30000;
+const CAMERA_TIMEOUT_MS = 10000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${what} timed out after ${ms / 1000}s`)), ms)),
+  ]);
+}
+
+/** localStorage key for the user's chosen camera (shared by the pet and dashboard windows). */
+export const CAMERA_PREF_KEY = 'ergogotchi.cameraId';
+
+export interface CameraOption {
+  deviceId: string;
+  label: string;
+}
+
+function readCameraPreference(): string | null {
+  try {
+    return localStorage.getItem(CAMERA_PREF_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export class VisionPipeline {
+  /** deviceId of the camera currently in use; null when on fallback signals. */
+  public activeCameraId: string | null = null;
   private videoElement: HTMLVideoElement | null = null;
   private isRunning: boolean = false;
   private intervalId: any = null;
@@ -41,6 +71,7 @@ export class VisionPipeline {
 
   // Blink state tracking
   private blinkTimestamps: number[] = [];
+  private blinkTrackingStartedAt: number = Date.now();
   private eyeClosedStartTime: number | null = null;
 
   // Smoothing buffers (1-second median smoothing)
@@ -70,6 +101,15 @@ export class VisionPipeline {
   /** Initialize MediaPipe Tasks-Vision (with fallback) */
   public async initMediaPipe(): Promise<boolean> {
     try {
+      return await withTimeout(this.loadMediaPipe(), MEDIAPIPE_TIMEOUT_MS, 'MediaPipe load');
+    } catch (e) {
+      console.warn('[ErgoGotchi Vision] MediaPipe unavailable, using fallback signals:', e);
+      return false;
+    }
+  }
+
+  private async loadMediaPipe(): Promise<boolean> {
+    {
       // Dynamic import to support modern CDN / npm bundle
       const vision = await import('@mediapipe/tasks-vision');
       const FilesetResolver = vision.FilesetResolver;
@@ -77,7 +117,7 @@ export class VisionPipeline {
       const PoseLandmarker = vision.PoseLandmarker;
 
       const wasmFileset = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+        `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
       );
 
       this.faceLandmarker = await FaceLandmarker.createFromOptions(wasmFileset, {
@@ -102,9 +142,6 @@ export class VisionPipeline {
 
       console.log('[ErgoGotchi Vision] MediaPipe Tasks-Vision loaded successfully.');
       return true;
-    } catch (e) {
-      console.warn('[ErgoGotchi Vision] MediaPipe WebAssembly load notice:', e);
-      return false;
     }
   }
 
@@ -113,18 +150,53 @@ export class VisionPipeline {
     if (!this.videoElement) return false;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
-        audio: false,
+      const video = this.videoElement;
+      const size = { width: 640, height: 480 };
+      const preferredId = readCameraPreference();
+      const openStream = async (): Promise<MediaStream> => {
+        try {
+          // The user's saved choice wins; otherwise let the browser pick a front-facing camera
+          const firstChoice = preferredId ? { deviceId: { exact: preferredId } } : { facingMode: 'user' };
+          return await navigator.mediaDevices.getUserMedia({ video: { ...size, ...firstChoice }, audio: false });
+        } catch (firstErr) {
+          // The first choice can be unplugged, or a virtual camera whose source app isn't running
+          // (e.g. OBS Virtual Camera). Try every other camera before giving up.
+          const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+          for (const cam of cams) {
+            if (cam.deviceId === preferredId) continue;
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({
+                video: { ...size, deviceId: { exact: cam.deviceId } },
+                audio: false,
+              });
+              console.log('[ErgoGotchi Vision] First-choice camera failed, using:', cam.label);
+              return stream;
+            } catch {
+              // Try the next camera
+            }
+          }
+          throw firstErr;
+        }
+      };
+      const open = openStream()
+        .then(async (stream) => {
+          video.srcObject = stream;
+          await video.play();
+          this.activeCameraId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? null;
+          return stream;
+        });
+      // If the camera answers after we gave up, release it instead of leaking it
+      open.catch(() => {});
+      await withTimeout(open, CAMERA_TIMEOUT_MS, 'Camera start').catch((e) => {
+        open.then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => {});
+        throw e;
       });
-      this.videoElement.srcObject = stream;
-      await this.videoElement.play();
 
       this.isRunning = true;
       this.startFrameLoop();
       return true;
     } catch (err) {
-      console.warn('[ErgoGotchi Vision] Camera access error:', err);
+      console.warn('[ErgoGotchi Vision] Camera unavailable, using fallback signals:', (err as Error)?.name, (err as Error)?.message);
       // Fallback: run simulated / test vision loop if camera is unavailable in test runner
       this.isRunning = true;
       this.startFallbackLoop();
@@ -132,8 +204,47 @@ export class VisionPipeline {
     }
   }
 
+  /** Cameras the user can pick from (labels need camera permission, which Electron grants). */
+  public async listCameras(): Promise<CameraOption[]> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices
+        .filter((d) => d.kind === 'videoinput' && d.deviceId)
+        .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Remember the chosen camera and restart capture on it. Recalibrate afterwards. */
+  public async switchCamera(deviceId: string): Promise<boolean> {
+    // Probe the new camera first: if it can't start (unplugged, or a virtual camera whose
+    // app is closed), leave the current one running untouched and report the failure.
+    try {
+      const probe = await withTimeout(
+        navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } }, audio: false }),
+        CAMERA_TIMEOUT_MS,
+        'Camera switch'
+      );
+      probe.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      console.warn('[ErgoGotchi Vision] Could not switch camera:', (err as Error)?.name, (err as Error)?.message);
+      return false;
+    }
+
+    try {
+      localStorage.setItem(CAMERA_PREF_KEY, deviceId);
+    } catch {
+      // Storage unavailable: the choice just won't persist
+    }
+    this.stopCamera();
+    await this.startCamera();
+    return this.activeCameraId === deviceId;
+  }
+
   public stopCamera() {
     this.isRunning = false;
+    this.activeCameraId = null;
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
@@ -198,6 +309,9 @@ export class VisionPipeline {
     };
 
     this.isCalibrated = true;
+    // New blink threshold -> restart the blink-rate window
+    this.blinkTimestamps = [];
+    this.blinkTrackingStartedAt = Date.now();
     console.log('[ErgoGotchi Vision] Calibration baseline locked:', this.baseline);
     if (this.onCalibrationComplete) {
       this.onCalibrationComplete(this.baseline);
@@ -338,6 +452,17 @@ export class VisionPipeline {
     }
   }
 
+  /**
+   * Blinks per minute. The raw count only covers the last 60s, so right after start-up it reads ~0,
+   * which used to look like severe eye strain. Report a normal rate for the first 20s, then extrapolate.
+   */
+  private currentBlinkRate(): number {
+    const elapsedMs = Date.now() - this.blinkTrackingStartedAt;
+    if (elapsedMs >= 60000) return this.blinkTimestamps.length;
+    if (elapsedMs < 20000) return 15;
+    return Math.round((this.blinkTimestamps.length * 60000) / elapsedMs);
+  }
+
   /** Compute normalized signals relative to calibrated baseline */
   private computeSignals(
     w: number,
@@ -375,7 +500,7 @@ export class VisionPipeline {
       head_pitch_deg: headPitch,
       lean_in: leanIn,
       shoulder_tilt_deg: tilt,
-      blink_rate_1m: this.blinkTimestamps.length,
+      blink_rate_1m: this.currentBlinkRate(),
       head_yaw_deg: y,
     };
 

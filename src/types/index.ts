@@ -59,6 +59,7 @@ export interface ScoringParams {
   sustainedSlouchSeconds: number; // Slouch duration before speech bubble trigger (30s normal, 3s demo)
   speechCooldownSeconds: number;  // Cooldown between speech bubbles (300s normal, 15s demo)
   lowBlinkWindowSeconds: number;  // Low-blink trigger window (60s normal, 15s demo)
+  warnAtHp: number;               // Slouch warning only fires once HP has dropped to this level
 }
 
 /** Scoring State maintained across frames */
