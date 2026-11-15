@@ -21,6 +21,35 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 /** localStorage key for the user's chosen camera (shared by the pet and dashboard windows). */
 export const CAMERA_PREF_KEY = 'ergogotchi.cameraId';
 
+export type CameraStatus = 'READY' | 'CALIBRATING' | 'ERROR' | 'OFFLINE';
+
+export interface LandmarkPoint {
+  x: number;
+  y: number;
+}
+
+export interface VisionLandmarks {
+  nose?: LandmarkPoint;
+  leftEye?: LandmarkPoint;
+  rightEye?: LandmarkPoint;
+  leftEar?: LandmarkPoint;
+  rightEar?: LandmarkPoint;
+  leftShoulder?: LandmarkPoint;
+  rightShoulder?: LandmarkPoint;
+  forehead?: LandmarkPoint;
+  chin?: LandmarkPoint;
+  faceLeft?: LandmarkPoint;
+  faceRight?: LandmarkPoint;
+  rawW: number;
+  rawD: number;
+  rawT: number;
+  rawPitch: number;
+  rawYaw: number;
+  blinkScore: number;
+  isPresent: boolean;
+  timestamp: number;
+}
+
 export interface CameraOption {
   deviceId: string;
   label: string;
@@ -37,9 +66,23 @@ function readCameraPreference(): string | null {
 export class VisionPipeline {
   /** deviceId of the camera currently in use; null when on fallback signals. */
   public activeCameraId: string | null = null;
+  public cameraStatus: CameraStatus = 'OFFLINE';
+  public latestLandmarks: VisionLandmarks | null = null;
   private videoElement: HTMLVideoElement | null = null;
+  private previewCanvas: HTMLCanvasElement | null = null;
   private isRunning: boolean = false;
   private intervalId: any = null;
+
+  // Cached vector landmark points for continuous high-DPI rendering between 2 Hz pose cycles
+  private lastKnownPosePoints: {
+    nose?: LandmarkPoint;
+    leftEye?: LandmarkPoint;
+    rightEye?: LandmarkPoint;
+    leftEar?: LandmarkPoint;
+    rightEar?: LandmarkPoint;
+    leftShoulder?: LandmarkPoint;
+    rightShoulder?: LandmarkPoint;
+  } = {};
 
   // MediaPipe Vision task instances
   private faceLandmarker: any = null;
@@ -217,15 +260,46 @@ export class VisionPipeline {
       });
 
       this.isRunning = true;
+      this.cameraStatus = 'READY';
       this.startFrameLoop();
       return true;
     } catch (err) {
       console.warn('[ErgoGotchi Vision] Camera unavailable, using fallback signals:', (err as Error)?.name, (err as Error)?.message);
       // Fallback: run simulated / test vision loop if camera is unavailable in test runner
       this.isRunning = true;
+      this.cameraStatus = 'ERROR';
       this.startFallbackLoop();
       return false;
     }
+  }
+
+  /** Capture a clean, crisp 640x360 JPEG frame (quality 0.80) for remote dashboard preview */
+  public capturePreviewFrame(
+    mirror: boolean = false,
+    width: number = 640,
+    height: number = 360,
+    quality: number = 0.80
+  ): string | null {
+    if (!this.videoElement || this.videoElement.readyState < 2) return null;
+    if (!this.previewCanvas) {
+      this.previewCanvas = document.createElement('canvas');
+    }
+    if (this.previewCanvas.width !== width || this.previewCanvas.height !== height) {
+      this.previewCanvas.width = width;
+      this.previewCanvas.height = height;
+    }
+    const ctx = this.previewCanvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.save();
+    if (mirror) {
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(this.videoElement, 0, 0, width, height);
+    ctx.restore();
+
+    return this.previewCanvas.toDataURL('image/jpeg', quality);
   }
 
   /** Return active MediaStream so UI previews can share the camera stream without opening a second exclusive device lock */
@@ -274,6 +348,7 @@ export class VisionPipeline {
   public stopCamera() {
     this.isRunning = false;
     this.activeCameraId = null;
+    this.cameraStatus = 'OFFLINE';
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
@@ -287,6 +362,7 @@ export class VisionPipeline {
   /** Start 5-second upright posture calibration */
   public startCalibration() {
     this.isCalibrating = true;
+    this.cameraStatus = 'CALIBRATING';
     this.calibrationProgress = 0;
     this.calibrationSamples = [];
     const startTime = Date.now();
@@ -305,6 +381,7 @@ export class VisionPipeline {
 
   private finishCalibration() {
     this.isCalibrating = false;
+    this.cameraStatus = this.isRunning ? 'READY' : 'OFFLINE';
     if (this.calibrationSamples.length < 5) {
       console.warn('[ErgoGotchi Vision] Too few calibration samples. Using defaults.');
       this.isCalibrated = true;
@@ -368,6 +445,11 @@ export class VisionPipeline {
       let rawPitch = this.lastKnownPitch;
       let rawYaw = this.lastKnownYaw;
       let blinkScore = 0.05;
+      let pLeft: any = null;
+      let pRight: any = null;
+      let pForehead: any = null;
+      let pChin: any = null;
+      let pNoseTip: any = null;
 
       try {
         // 1. Process Face Landmarker (runs every frame >= 20fps for blink detection)
@@ -377,9 +459,13 @@ export class VisionPipeline {
             isPresent = true;
             const facePoints = faceResult.faceLandmarks[0];
 
-            // Estimate Face Width (F) between tragus/temples (landmarks 234 and 454)
-            const pLeft = facePoints[234];
-            const pRight = facePoints[454];
+            // Key face points for metrics and vector bounding box
+            pLeft = facePoints[234];
+            pRight = facePoints[454];
+            pForehead = facePoints[10];
+            pChin = facePoints[152];
+            pNoseTip = facePoints[1] || facePoints[4];
+
             if (pLeft && pRight) {
               rawF = Math.hypot(pRight.x - pLeft.x, pRight.y - pLeft.y);
               this.lastKnownF = rawF;
@@ -415,6 +501,17 @@ export class VisionPipeline {
             const rightShoulder = pose[12];
             const leftEar = pose[7];
             const rightEar = pose[8];
+            const poseNose = pose[0];
+            const poseLeftEye = pose[2];
+            const poseRightEye = pose[5];
+
+            if (poseNose) this.lastKnownPosePoints.nose = { x: poseNose.x, y: poseNose.y };
+            if (poseLeftEye) this.lastKnownPosePoints.leftEye = { x: poseLeftEye.x, y: poseLeftEye.y };
+            if (poseRightEye) this.lastKnownPosePoints.rightEye = { x: poseRightEye.x, y: poseRightEye.y };
+            if (leftEar) this.lastKnownPosePoints.leftEar = { x: leftEar.x, y: leftEar.y };
+            if (rightEar) this.lastKnownPosePoints.rightEar = { x: rightEar.x, y: rightEar.y };
+            if (leftShoulder) this.lastKnownPosePoints.leftShoulder = { x: leftShoulder.x, y: leftShoulder.y };
+            if (rightShoulder) this.lastKnownPosePoints.rightShoulder = { x: rightShoulder.x, y: rightShoulder.y };
 
             if (leftShoulder && rightShoulder && leftShoulder.visibility > 0.5 && rightShoulder.visibility > 0.5) {
               rawW = Math.hypot(rightShoulder.x - leftShoulder.x, rightShoulder.y - leftShoulder.y);
@@ -435,6 +532,29 @@ export class VisionPipeline {
       } catch (err) {
         // Landmarker frame error
       }
+
+      // Assemble latest landmark snapshot for razor-sharp vector HUD rendering on Dashboard
+      this.latestLandmarks = {
+        nose: this.lastKnownPosePoints.nose || (pNoseTip ? { x: pNoseTip.x, y: pNoseTip.y } : undefined),
+        leftEye: this.lastKnownPosePoints.leftEye,
+        rightEye: this.lastKnownPosePoints.rightEye,
+        leftEar: this.lastKnownPosePoints.leftEar,
+        rightEar: this.lastKnownPosePoints.rightEar,
+        leftShoulder: this.lastKnownPosePoints.leftShoulder,
+        rightShoulder: this.lastKnownPosePoints.rightShoulder,
+        forehead: pForehead ? { x: pForehead.x, y: pForehead.y } : undefined,
+        chin: pChin ? { x: pChin.x, y: pChin.y } : undefined,
+        faceLeft: pLeft ? { x: pLeft.x, y: pLeft.y } : undefined,
+        faceRight: pRight ? { x: pRight.x, y: pRight.y } : undefined,
+        rawW,
+        rawD,
+        rawT,
+        rawPitch,
+        rawYaw,
+        blinkScore,
+        isPresent,
+        timestamp: Date.now(),
+      };
 
       // Collect calibration sample
       if (this.isCalibrating && isPresent) {
@@ -595,6 +715,27 @@ export class VisionPipeline {
         shoulder_tilt_deg: 1.0,
         blink_rate_1m: 14,
         head_yaw_deg: 0.0,
+      };
+      this.latestLandmarks = {
+        nose: { x: 0.5, y: 0.38 },
+        leftEye: { x: 0.45, y: 0.34 },
+        rightEye: { x: 0.55, y: 0.34 },
+        leftEar: { x: 0.38, y: 0.38 },
+        rightEar: { x: 0.62, y: 0.38 },
+        leftShoulder: { x: 0.32, y: 0.68 },
+        rightShoulder: { x: 0.68, y: 0.68 },
+        forehead: { x: 0.5, y: 0.28 },
+        chin: { x: 0.5, y: 0.48 },
+        faceLeft: { x: 0.42, y: 0.38 },
+        faceRight: { x: 0.58, y: 0.38 },
+        rawW: 0.35,
+        rawD: 0.20,
+        rawT: 1.0,
+        rawPitch: 2.0,
+        rawYaw: 0.0,
+        blinkScore: 0.05,
+        isPresent: true,
+        timestamp: Date.now(),
       };
       if (this.onSignalsComputed) {
         this.onSignalsComputed(s, true);

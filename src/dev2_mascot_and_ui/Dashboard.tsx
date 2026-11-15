@@ -10,6 +10,7 @@ import { DifficultyLevel, PetState, UpdateInfo, UpdateProgress } from '../types'
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal, recordDebriefReward, updateJournal } from './journal';
 import { MyDuck } from './MyDuck';
 import { CameraScreen } from './CameraScreen';
+import type { CameraStatus, VisionLandmarks } from '../dev1_sensing_and_scoring/visionPipeline';
 import type { ForcedActivity } from './PixelMascot';
 import {
   ADULT_LEVEL,
@@ -104,6 +105,11 @@ interface DashboardProps {
   isPresent?: boolean;
   isCalibrating?: boolean;
   calibrationProgress?: number;
+  previewFrame?: string | null;
+  landmarks?: VisionLandmarks | null;
+  cameraStatus?: CameraStatus;
+  onPreviewRequest?: (active: boolean) => void;
+  onRefreshCameras?: () => void;
 
   // Auto-Updates & System Startup
   appVersion?: string;
@@ -185,6 +191,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isPresent = true,
   isCalibrating = false,
   calibrationProgress = 0,
+  previewFrame = null,
+  landmarks = null,
+  cameraStatus = 'OFFLINE',
+  onPreviewRequest,
+  onRefreshCameras,
   appVersion = '1.0.1',
   updateInfo = null,
   updateProgress = null,
@@ -307,6 +318,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const [activeTab, setActiveTab] = useState<TabId>('analytics');
+
+  // Notify primary window when demo tab is active so camera frames only stream when needed
+  useEffect(() => {
+    if (activeTab === 'demo') {
+      onPreviewRequest?.(true);
+    } else {
+      onPreviewRequest?.(false);
+    }
+  }, [activeTab, onPreviewRequest]);
   const [seriesData, setSeriesData] = useState<any[]>([]);
   const [sessionSummary, setSessionSummary] = useState<string>('Analyzing your focus session...');
   const [tigerStats, setTigerStats] = useState<any>(null);
@@ -730,6 +750,11 @@ GROUP BY bucket, session_id;`}</pre>
                   isPresent={isPresent}
                   isCalibrating={isCalibrating}
                   calibrationProgress={calibrationProgress}
+                  previewFrame={previewFrame}
+                  landmarks={landmarks}
+                  cameraStatus={cameraStatus}
+                  onPreviewRequest={onPreviewRequest}
+                  onRefreshCameras={onRefreshCameras}
                 />
 
                 {/* Column 2: Presenter Manual Overrides */}

@@ -21,7 +21,13 @@ import {
   NORMAL_PARAMS, 
   step 
 } from './dev1_sensing_and_scoring/scoring';
-import { visionPipeline, CAMERA_PREF_KEY, type CameraOption } from './dev1_sensing_and_scoring/visionPipeline';
+import {
+  visionPipeline,
+  CAMERA_PREF_KEY,
+  type CameraOption,
+  type CameraStatus,
+  type VisionLandmarks,
+} from './dev1_sensing_and_scoring/visionPipeline';
 import { wsClient } from './net/websocketClient';
 import { MascotSprite } from './dev2_mascot_and_ui/MascotSprite';
 import type { Activity, ForcedActivity, PetEmote } from './dev2_mascot_and_ui/PixelMascot';
@@ -114,6 +120,14 @@ type PresenterMessage =
   | { type: 'hello' }
   | { type: 'recalibrate' }
   | { type: 'warning' }
+  | { type: 'select_camera'; deviceId: string }
+  | { type: 'preview_request'; active: boolean }
+  | {
+      type: 'preview_frame';
+      dataUrl: string;
+      landmarks?: VisionLandmarks | null;
+      timestamp: number;
+    }
   | {
       type: 'telemetry_sync';
       hp: number;
@@ -125,6 +139,8 @@ type PresenterMessage =
       isPresent: boolean;
       speechText?: string | null;
       speechCue?: StretchCue | null;
+      activeCameraId?: string | null;
+      cameraStatus?: CameraStatus;
     };
 const presenterChannel: BroadcastChannel | null =
   typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('ergogotchi-presenter');
@@ -199,6 +215,11 @@ export const App: React.FC = () => {
   // Camera picker state
   const [cameras, setCameras] = useState<CameraOption[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
+  const [previewFrame, setPreviewFrame] = useState<string | null>(null);
+  const [landmarks, setLandmarks] = useState<VisionLandmarks | null>(null);
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>(() => visionPipeline.cameraStatus);
+  const previewRequestedRef = useRef<boolean>(false);
+  const lastPreviewRequestedAtRef = useRef<number>(0);
 
   // The pet's profile (name, level, corn, clothes), kept in localStorage and shared between windows
   const [pet, setPet] = useState<PetProfile>(() => loadPet());
@@ -329,12 +350,34 @@ export const App: React.FC = () => {
   const refreshCameras = async () => {
     const list = await visionPipeline.listCameras();
     setCameras(list);
-    setActiveCameraId(visionPipeline.activeCameraId);
-    if (isPetWindow) electronAPI?.setCameraList?.(list, visionPipeline.activeCameraId);
+    const active = visionPipeline.activeCameraId;
+    setActiveCameraId(active);
+    setCameraStatus(visionPipeline.cameraStatus);
+    if (isPetWindow) electronAPI?.setCameraList?.(list, active);
   };
 
+  // Re-enumerate cameras on mount across all windows (Duck & Dashboard) so camera list is immediately populated
+  useEffect(() => {
+    refreshCameras();
+  }, []);
+
   const handleSelectCamera = async (deviceId: string) => {
-    if (!deviceId || deviceId === visionPipeline.activeCameraId) return;
+    if (!deviceId) return;
+
+    // Follower / Dashboard view: delegate hardware camera selection to Duck companion window
+    if (isDashboardView && electronAPI?.isElectron) {
+      setActiveCameraId(deviceId);
+      try {
+        localStorage.setItem(CAMERA_PREF_KEY, deviceId);
+      } catch {}
+      presenterChannel?.postMessage({
+        type: 'select_camera',
+        deviceId,
+      } satisfies PresenterMessage);
+      return;
+    }
+
+    if (deviceId === visionPipeline.activeCameraId) return;
     // One switch at a time: duplicate events (menu + storage, StrictMode listeners) must not open two streams
     if (cameraSwitchInFlight) return;
     cameraSwitchInFlight = true;
@@ -361,6 +404,47 @@ export const App: React.FC = () => {
     // A different camera sees you from a different angle: the old baseline no longer applies
     handleRecalibrate();
   };
+
+  const handlePreviewRequest = (active: boolean) => {
+    previewRequestedRef.current = active;
+    if (active) {
+      lastPreviewRequestedAtRef.current = Date.now();
+    }
+    if (isDashboardView && presenterChannel) {
+      presenterChannel.postMessage({
+        type: 'preview_request',
+        active,
+      } satisfies PresenterMessage);
+    }
+  };
+
+  // Crisp Preview + Native Vector Overlay (Approach A): Broadcast frames + landmarks only when requested
+  useEffect(() => {
+    if (isDashboardView && electronAPI?.isElectron) return;
+
+    // ~20-24 FPS (45ms interval). 640x360 JPEG 0.80 produces crisp feed with zero IPC overhead when dormant
+    const streamInterval = setInterval(() => {
+      if (!previewRequestedRef.current) return;
+      // Auto-inactivate if Dashboard stopped requesting (e.g. closed without cleanup)
+      if (Date.now() - lastPreviewRequestedAtRef.current > 6000) {
+        previewRequestedRef.current = false;
+        return;
+      }
+      if (!presenterChannel) return;
+
+      const dataUrl = visionPipeline.capturePreviewFrame(false, 640, 360, 0.8);
+      if (dataUrl) {
+        presenterChannel.postMessage({
+          type: 'preview_frame',
+          dataUrl,
+          landmarks: visionPipeline.latestLandmarks,
+          timestamp: Date.now(),
+        } satisfies PresenterMessage);
+      }
+    }, 45);
+
+    return () => clearInterval(streamInterval);
+  }, []);
 
   useEffect(() => {
     // Cameras plugged in or removed
@@ -610,6 +694,8 @@ export const App: React.FC = () => {
           isPresent,
           speechText: speechCueRef.current ? speechText : null,
           speechCue: speechCueRef.current,
+          activeCameraId: visionPipeline.activeCameraId,
+          cameraStatus: visionPipeline.cameraStatus,
         } satisfies PresenterMessage);
       }
     }, 1000);
@@ -654,7 +740,19 @@ export const App: React.FC = () => {
       if (msg.type === 'set') applyPresenter(msg.patch);
       else if (msg.type === 'recalibrate') handleRecalibrate();
       else if (msg.type === 'warning') showWarning();
-      else if (msg.type === 'telemetry_sync') {
+      else if (msg.type === 'select_camera') {
+        handleSelectCamera(msg.deviceId);
+      } else if (msg.type === 'preview_request') {
+        previewRequestedRef.current = msg.active;
+        if (msg.active) {
+          lastPreviewRequestedAtRef.current = Date.now();
+        }
+      } else if (msg.type === 'preview_frame') {
+        setPreviewFrame(msg.dataUrl);
+        if (msg.landmarks !== undefined) {
+          setLandmarks(msg.landmarks);
+        }
+      } else if (msg.type === 'telemetry_sync') {
         lastTelemetrySyncAtRef.current = Date.now();
         setScoringState((prev) => ({
           ...prev,
@@ -681,6 +779,8 @@ export const App: React.FC = () => {
         setIsPresent(msg.isPresent);
         if (msg.speechText !== undefined) setSpeechText(msg.speechText);
         if (msg.speechCue !== undefined) setSpeechCue(msg.speechCue);
+        if (msg.activeCameraId !== undefined) setActiveCameraId(msg.activeCameraId);
+        if (msg.cameraStatus !== undefined) setCameraStatus(msg.cameraStatus);
       } else if (msg.type === 'hello') {
         // A window just opened: send it the current controls
         presenterChannel.postMessage({
@@ -692,7 +792,7 @@ export const App: React.FC = () => {
           },
         } satisfies PresenterMessage);
 
-        // If this window is the primary telemetry producer, immediately sync the new window with current HP
+        // If this window is the primary telemetry producer, immediately sync the new window with current HP & camera
         if (!isDashboardView) {
           const currentScoring = scoringStateRef.current;
           const currentSig = currentSignalsRef.current;
@@ -707,6 +807,8 @@ export const App: React.FC = () => {
             isPresent: isPresentRef.current,
             speechText: speechCueRef.current ? speechText : null,
             speechCue: speechCueRef.current,
+            activeCameraId: visionPipeline.activeCameraId,
+            cameraStatus: visionPipeline.cameraStatus,
           } satisfies PresenterMessage);
         }
       }
@@ -969,6 +1071,11 @@ export const App: React.FC = () => {
           cameras={cameras}
           activeCameraId={activeCameraId}
           onSelectCamera={handleSelectCamera}
+          previewFrame={previewFrame}
+          landmarks={landmarks}
+          cameraStatus={cameraStatus}
+          onPreviewRequest={handlePreviewRequest}
+          onRefreshCameras={refreshCameras}
           onHide={isDashboardView ? undefined : () => setShowDashboard(false)}
           forcedState={forcedState}
           forcedActivity={forcedActivity}
