@@ -113,7 +113,19 @@ type PresenterMessage =
   | { type: 'set'; patch: Partial<PresenterState> }
   | { type: 'hello' }
   | { type: 'recalibrate' }
-  | { type: 'warning' };
+  | { type: 'warning' }
+  | {
+      type: 'telemetry_sync';
+      hp: number;
+      state: PetState;
+      strainIndex: number;
+      worstSignal: string;
+      blinkRate: number;
+      isCalibrated: boolean;
+      isPresent: boolean;
+      speechText?: string | null;
+      speechCue?: StretchCue | null;
+    };
 const presenterChannel: BroadcastChannel | null =
   typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('ergogotchi-presenter');
 
@@ -269,6 +281,7 @@ export const App: React.FC = () => {
   const emoteRef = useRef<PetEmote | null>(emote);
   emoteRef.current = emote;
   const goodPostureSecondsRef = useRef(0);
+  const lastTelemetrySyncAtRef = useRef<number>(0);
 
   // 1. Initialise Vision Pipeline & WebSocket Client
   useEffect(() => {
@@ -306,7 +319,7 @@ export const App: React.FC = () => {
       }
     };
 
-    if (!visionStarted) {
+    if (!visionStarted && (!isDashboardView || !electronAPI?.isElectron)) {
       visionStarted = true;
       initVision();
     }
@@ -484,6 +497,13 @@ export const App: React.FC = () => {
   // 2. 1-Hz Scoring & Telemetry Dispatch Loop
   useEffect(() => {
     const loopInterval = setInterval(() => {
+      // If this window is a secondary dashboard view receiving live telemetry from the desktop duck,
+      // preserve the remote duck's live HP/strain instead of calculating locally without a camera
+      const isReceivingRemoteTelemetry = isDashboardView && Date.now() - lastTelemetrySyncAtRef.current < 2500;
+      if (isReceivingRemoteTelemetry) {
+        return;
+      }
+
       const params: ScoringParams = isDemoModeRef.current 
         ? DEMO_PARAMS 
         : (DIFFICULTY_PRESETS[difficultyRef.current] || NORMAL_PARAMS);
@@ -576,6 +596,22 @@ export const App: React.FC = () => {
           hp: Math.round(next.hp),
         });
       }
+
+      // Broadcast live telemetry to other open windows (e.g. popped-out companion dashboard)
+      if (!isDashboardView && presenterChannel) {
+        presenterChannel.postMessage({
+          type: 'telemetry_sync',
+          hp: next.hp,
+          state: next.state,
+          strainIndex: next.strainIndex,
+          worstSignal: next.worstSignal || 'None',
+          blinkRate: currentSignals?.blink_rate_1m || 14,
+          isCalibrated: visionPipeline.isCalibrated,
+          isPresent,
+          speechText: speechCueRef.current ? speechText : null,
+          speechCue: speechCueRef.current,
+        } satisfies PresenterMessage);
+      }
     }, 1000);
 
     return () => clearInterval(loopInterval);
@@ -618,7 +654,34 @@ export const App: React.FC = () => {
       if (msg.type === 'set') applyPresenter(msg.patch);
       else if (msg.type === 'recalibrate') handleRecalibrate();
       else if (msg.type === 'warning') showWarning();
-      else if (msg.type === 'hello') {
+      else if (msg.type === 'telemetry_sync') {
+        lastTelemetrySyncAtRef.current = Date.now();
+        setScoringState((prev) => ({
+          ...prev,
+          hp: msg.hp,
+          state: msg.state,
+          strainIndex: msg.strainIndex,
+          worstSignal: msg.worstSignal,
+        }));
+        if (typeof msg.blinkRate === 'number') {
+          setCurrentSignals((prev) => ({
+            ...(prev || {
+              forward_head: 0,
+              head_drop: 0,
+              head_pitch_deg: 0,
+              head_yaw_deg: 0,
+              lean_in: 0,
+              shoulder_tilt_deg: 0,
+              open_eye_score: 0.1,
+            }),
+            blink_rate_1m: msg.blinkRate,
+          }));
+        }
+        setIsCalibrated(msg.isCalibrated);
+        setIsPresent(msg.isPresent);
+        if (msg.speechText !== undefined) setSpeechText(msg.speechText);
+        if (msg.speechCue !== undefined) setSpeechCue(msg.speechCue);
+      } else if (msg.type === 'hello') {
         // A window just opened: send it the current controls
         presenterChannel.postMessage({
           type: 'set',
@@ -628,6 +691,24 @@ export const App: React.FC = () => {
             demoMode: isDemoModeRef.current,
           },
         } satisfies PresenterMessage);
+
+        // If this window is the primary telemetry producer, immediately sync the new window with current HP
+        if (!isDashboardView) {
+          const currentScoring = scoringStateRef.current;
+          const currentSig = currentSignalsRef.current;
+          presenterChannel.postMessage({
+            type: 'telemetry_sync',
+            hp: currentScoring.hp,
+            state: currentScoring.state,
+            strainIndex: currentScoring.strainIndex,
+            worstSignal: currentScoring.worstSignal || 'None',
+            blinkRate: currentSig?.blink_rate_1m || 14,
+            isCalibrated: visionPipeline.isCalibrated,
+            isPresent: isPresentRef.current,
+            speechText: speechCueRef.current ? speechText : null,
+            speechCue: speechCueRef.current,
+          } satisfies PresenterMessage);
+        }
       }
     };
     presenterChannel.addEventListener('message', onMessage);
