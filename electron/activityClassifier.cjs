@@ -51,7 +51,8 @@ function classifyActivity({ proc = '', title = '', spotifyTitle = '' } = {}) {
   const t = String(title);
 
   // Our own windows (the pet, its menu, the dashboard) say nothing about what the user is doing
-  if (/ergogotchi/i.test(t) || /^ergogotchi$/i.test(p)) return null;
+  const isOwnWindow = /^ergogotchi$/i.test(p) || (/^(electron|node)$/i.test(p) && /ergogotchi/i.test(t));
+  if (isOwnWindow) return null;
 
   const musicInFront = MUSIC_PROCS.test(p) || MUSIC_TITLES.test(t);
   const music = musicInFront || spotifyIsPlaying(spotifyTitle);
