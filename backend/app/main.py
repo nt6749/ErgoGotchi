@@ -29,8 +29,8 @@ logger = logging.getLogger("ergogotchi.main")
 telemetry_buffer: deque[Dict[str, Any]] = deque(maxlen=settings.BUFFER_MAX_SIZE)
 buffer_lock = asyncio.Lock()
 
-# In-memory session summary cache with 30s TTL
-summary_cache: Dict[str, Dict[str, Any]] = {}
+# In-memory session summary cache with 30s TTL: session_id -> (timestamp, fingerprint_tuple, data_dict)
+summary_cache: Dict[str, tuple[float, tuple, Dict[str, Any]]] = {}
 
 async def flush_buffer_task():
     """Periodically flush telemetry buffer into TimescaleDB/SQLite."""
@@ -129,42 +129,54 @@ async def get_session_series(session_id: str, minutes: int = Query(default=30, g
 
 @app.get("/sessions/{session_id}/summary")
 async def get_session_summary(session_id: str):
-    """Computes session overview and generates 3-sentence Gemini ergonomic coaching summary with 30s cache."""
+    """Computes session overview, baseline drift vectors, and cached 3-sentence Gemini coaching summary."""
     rows = await db.get_series(session_id, minutes=120)
     if not rows:
         return {
             "session_id": session_id,
             "summary": "No session telemetry recorded yet. Start sitting upright with your ErgoGotchi!",
-            "stats": {"min_hp": 100, "avg_strain": 0.0, "minutes": 0, "avg_blink_rate": 15}
+            "stats": {
+                "min_hp": 100,
+                "avg_strain": 0.0,
+                "peak_strain": 0.0,
+                "avg_forward_head": 0.0,
+                "avg_head_drop": 0.0,
+                "minutes": 0,
+                "avg_blink_rate": 15.0,
+            }
         }
 
-    avg_strain = sum(r["avg_strain"] for r in rows) / len(rows)
-    min_hp = min(r["min_hp"] for r in rows)
-    avg_blink = sum(r["avg_blink_rate"] for r in rows) / len(rows)
+    n = len(rows)
+    avg_strain = sum((r.get("avg_strain") or 0.0) for r in rows) / n
+    peak_strain = max((r.get("peak_strain") or 0.0) for r in rows)
+    avg_fhead = sum((r.get("avg_forward_head") or 0.0) for r in rows) / n
+    avg_hdrop = sum((r.get("avg_head_drop") or 0.0) for r in rows) / n
+    min_hp = int(min((100 if r.get("min_hp") is None else r["min_hp"]) for r in rows))
+    avg_blink = sum((r.get("avg_blink_rate") or 15.0) for r in rows) / n
+
     stats = {
         "avg_strain": round(avg_strain, 3),
+        "peak_strain": round(peak_strain, 3),
+        "avg_forward_head": round(avg_fhead, 3),
+        "avg_head_drop": round(avg_hdrop, 3),
         "min_hp": min_hp,
-        "minutes": len(rows),
-        "avg_blink_rate": round(avg_blink, 1)
+        "minutes": n,
+        "avg_blink_rate": round(avg_blink, 1),
     }
 
-    cache_fingerprint = (session_id, len(rows), stats["min_hp"], round(stats["avg_strain"], 1))
+    fingerprint = (n, min_hp, round(avg_strain, 1), round(avg_fhead, 2), round(avg_hdrop, 2))
     now = asyncio.get_running_loop().time()
     cached = summary_cache.get(session_id)
-    if cached and cached.get("fingerprint") == cache_fingerprint and (now - cached.get("ts", 0)) < 30.0:
-        return cached["data"]
+    if cached and (now - cached[0]) < 30.0 and cached[1] == fingerprint:
+        return cached[2]
 
     summary = await gemini_engine.generate_session_summary(stats)
     result = {
         "session_id": session_id,
         "stats": stats,
-        "summary": summary
+        "summary": summary,
     }
-    summary_cache[session_id] = {
-        "fingerprint": cache_fingerprint,
-        "ts": now,
-        "data": result
-    }
+    summary_cache[session_id] = (now, fingerprint, result)
     return result
 
 @app.post("/grok-bot/webhook")

@@ -554,24 +554,107 @@ def test_fastapi_websocket_auth_and_protocols(monkeypatch):
         logger.info("-> WebSocket safely recovered from malformed JSON without dropping.")
 
 
-def test_grok_bot_service_safeties():
-    """Verify Grok Bot webhook service gracefully handles missing URLs, None IDs, and empty stats."""
-    logger.info("Executing test_grok_bot_service_safeties...")
-    # 1. Unconfigured webhook returns False cleanly
-    res_no_url = asyncio.run(grok_bot.send_session_digest(
-        session_id="test-session",
-        summary_text="Great work sitting upright!",
-        stats={"min_hp": 80, "avg_strain": 0.2, "avg_blink_rate": 14},
-        webhook_url=""
-    ))
-    assert res_no_url is False
+def test_desk_setup_diagnosis_deterministic():
+    """Verify Grok Bot deterministically diagnoses physical desk flaws from F/W and D/W drift vectors."""
+    logger.info("Executing test_desk_setup_diagnosis_deterministic...")
 
-    # 2. Non-string / short / None session_id survives formatting
-    res_none_id = asyncio.run(grok_bot.send_session_digest(
-        session_id=None,
-        summary_text="Focus session complete.",
-        stats={},
-        webhook_url=""
-    ))
-    assert res_none_id is False
-    logger.info("-> Grok Bot service safeties verified.")
+    # 1. High Y-axis head drop + low forward head -> MONITOR_TOO_LOW (2 textbooks fix)
+    d_low = grok_bot.diagnose_desk_setup({"avg_head_drop": 0.14, "avg_forward_head": 0.03, "avg_blink_rate": 14})
+    assert d_low["code"] == "MONITOR_TOO_LOW"
+    assert "textbooks" in d_low["fix"]
+
+    # 2. High Z-axis forward head -> SCREEN_MAGNET (Ctrl + = font size fix)
+    d_mag = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.15, "avg_head_drop": 0.04, "avg_blink_rate": 14})
+    assert d_mag["code"] == "SCREEN_MAGNET"
+    assert "Ctrl + =" in d_mag["fix"]
+
+    # 3. Low blink rate (< 9 bpm) -> OPTICAL_FIXATION (20-20-20 quest)
+    d_blink = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.03, "avg_head_drop": 0.03, "avg_blink_rate": 6.5})
+    assert d_blink["code"] == "OPTICAL_FIXATION"
+    assert "20-20-20" in d_blink["quest"]
+
+    # 4. High strain / low HP with normal head vectors -> LUMBAR_SLUMP (hoodie/pillow backrest fix)
+    d_slump = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.04, "avg_head_drop": 0.04, "avg_blink_rate": 14, "min_hp": 35})
+    assert d_slump["code"] == "LUMBAR_SLUMP"
+
+    # 5. Healthy session -> DIALED_IN
+    d_good = grok_bot.diagnose_desk_setup({"avg_forward_head": 0.02, "avg_head_drop": 0.02, "avg_blink_rate": 15, "avg_strain": 0.15, "min_hp": 92})
+    assert d_good["code"] == "DIALED_IN"
+    logger.info("-> Passed deterministic desk-setup diagnoses.")
+
+
+def test_grok_bot_service_safeties(monkeypatch):
+    """Verify Grok Bot handles None stats, ASCII header safety for ntfy, and 6-field Discord diagnostic cards."""
+    logger.info("Executing test_grok_bot_service_safeties...")
+
+    captured = []
+
+    class DummyResponse:
+        status_code = 200
+        text = "ok"
+
+    async def fake_post(url, **kwargs):
+        # Verify all HTTP headers are strictly ASCII/Latin-1 encodable
+        for k, v in (kwargs.get("headers") or {}).items():
+            v.encode("latin-1")
+        captured.append((url, kwargs))
+        return DummyResponse()
+
+    async def _run():
+        # 1. Unconfigured webhook returns False cleanly
+        assert await grok_bot.send_session_digest("s1", "Great job!", {"min_hp": 85}, webhook_url="") is False
+
+        # 2. Explicit None metrics do not raise TypeError
+        assert await grok_bot.send_session_digest(
+            None,
+            None,
+            {
+                "min_hp": None,
+                "avg_strain": None,
+                "peak_strain": None,
+                "avg_forward_head": None,
+                "avg_head_drop": None,
+                "avg_blink_rate": None,
+                "minutes": None,
+            },
+            webhook_url="",
+        ) is False
+
+        client = grok_bot._get_client()
+        monkeypatch.setattr(client, "post", fake_post)
+
+        stats = {
+            "min_hp": 88,
+            "avg_strain": 0.18,
+            "peak_strain": 0.34,
+            "avg_forward_head": 0.14,  # Triggers SCREEN_MAGNET diagnosis
+            "avg_head_drop": 0.03,
+            "avg_blink_rate": 16.2,
+            "minutes": 45,
+        }
+
+        # 3. ntfy.sh route: ASCII-safe headers + UTF-8 bytes body with diagnosis
+        assert await grok_bot.send_session_digest("sess-1234", "Awesome session!", stats, "https://ntfy.sh/ergo_demo") is True
+        assert "headers" in captured[-1][1]
+        assert b"SCREEN_MAGNET" in captured[-1][1]["content"]
+
+        # 4. Google Chat route: strictly {"text": ...} with no Discord "embeds"
+        assert await grok_bot.send_session_digest("sess-1234", "Awesome session!", stats, "https://chat.googleapis.com/v1/spaces/x") is True
+        gchat_json = captured[-1][1]["json"]
+        assert set(gchat_json.keys()) == {"text"}
+        assert "SCREEN_MAGNET" in gchat_json["text"]
+
+        # 5. Discord / generic route: includes all 6 fields (4 telemetry + Desk Diagnosis + Next-Session Quest)
+        assert await grok_bot.send_session_digest("sess-1234", "Awesome session!", stats, "https://discord.com/api/webhooks/1/2") is True
+        discord_json = captured[-1][1]["json"]
+        assert "text" in discord_json and "embeds" in discord_json
+        fields = discord_json["embeds"][0]["fields"]
+        assert len(fields) == 6
+        assert "SCREEN_MAGNET" in fields[4]["name"]
+        assert "Falcon Eye Protocol" in fields[5]["value"]
+
+        await grok_bot.aclose()
+        assert grok_bot._client is None
+
+    asyncio.run(_run())
+    logger.info("-> Grok Bot service safeties, ASCII headers, and 6-field diagnostic embed verified.")
