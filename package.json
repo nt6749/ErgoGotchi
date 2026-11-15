@@ -6,6 +6,8 @@
   "description": "ErgoGotchi: Biometric Desktop Companion & Ergonomic Telemetry Engine for sunhacks 2026",
   "main": "electron/main.cjs",
   "scripts": {
+    "start": "node scripts/launcher.cjs",
+    "start:web": "node scripts/launcher.cjs --web",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

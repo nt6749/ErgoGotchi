@@ -1,19 +1,84 @@
 /**
  * Electron Main Process for ErgoGotchi Desktop Shell.
- * Provides transparent, always-on-top, frameless window with native OS physics.
+ * Provides transparent, always-on-top, frameless window with native OS physics,
+ * click-through mouse support, and automated backend service lifecycle management.
  */
 
 const { app, BrowserWindow, screen, ipcMain, Menu } = require('electron');
 const path = require('path');
+const { spawn } = require('child_process');
+const http = require('http');
+const fs = require('fs');
 
 let petWindow = null;
 let dashboardWindow = null;
+let backendProcess = null;
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
 let activeCameraId = null;
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+
+function checkBackendAlive() {
+  return new Promise((resolve) => {
+    const req = http.get('http://localhost:8000/health', (res) => {
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(600, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function startBackend() {
+  const rootDir = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
+  let pythonPath = 'python3';
+  if (process.platform === 'win32') {
+    const venvWin = path.join(rootDir, '.venv', 'Scripts', 'python.exe');
+    pythonPath = fs.existsSync(venvWin) ? venvWin : 'python';
+  } else {
+    const venvUnix = path.join(rootDir, '.venv', 'bin', 'python');
+    pythonPath = fs.existsSync(venvUnix) ? venvUnix : 'python3';
+  }
+
+  const scriptPath = path.join(rootDir, 'backend', 'app', 'main.py');
+  if (!fs.existsSync(scriptPath)) {
+    console.log('[ErgoGotchi] No backend script found at path; running in offline edge mode.');
+    return;
+  }
+
+  console.log(`[ErgoGotchi] Auto-starting backend using ${pythonPath}...`);
+  try {
+    backendProcess = spawn(pythonPath, [scriptPath], {
+      cwd: rootDir,
+      env: { ...process.env, PYTHONPATH: path.join(rootDir, 'backend') },
+      stdio: 'pipe',
+    });
+
+    backendProcess.on('exit', () => {
+      backendProcess = null;
+    });
+  } catch (e) {
+    console.warn('[ErgoGotchi] Could not auto-spawn backend:', e);
+  }
+}
+
+function stopBackend() {
+  if (backendProcess) {
+    console.log('[ErgoGotchi] Stopping background backend...');
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', backendProcess.pid, '/f', '/t']);
+      } else {
+        backendProcess.kill('SIGTERM');
+      }
+    } catch (e) {}
+    backendProcess = null;
+  }
+}
 
 function createPetWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
@@ -176,7 +241,12 @@ ipcMain.on('open-dashboard', () => {
   createDashboardWindow();
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const isAlive = await checkBackendAlive();
+  if (!isAlive) {
+    startBackend();
+  }
+
   createPetWindow();
 
   app.on('activate', () => {
@@ -186,7 +256,16 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  stopBackend();
+});
+
+app.on('will-quit', () => {
+  stopBackend();
+});
+
 app.on('window-all-closed', () => {
+  stopBackend();
   if (process.platform !== 'darwin') {
     app.quit();
   }

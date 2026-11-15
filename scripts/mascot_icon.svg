@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="blob" x1="256" y1="80" x2="256" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34D399"/>
+      <stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- App Icon Background squircle -->
+  <rect x="16" y="16" width="480" height="480" rx="110" fill="url(#bg)" stroke="#334155" stroke-width="6"/>
+
+  <!-- Golden Sparkles -->
+  <text x="390" y="160" font-size="36" fill="#FCD34D" filter="url(#glow)">✦</text>
+  <text x="90" y="220" font-size="28" fill="#6EE7B7">★</text>
+
+  <!-- Headphones Band -->
+  <path d="M160 170 C160 90, 352 90, 352 170" fill="none" stroke="#818CF8" stroke-width="20" stroke-linecap="round"/>
+  <!-- Headphone earcups -->
+  <rect x="135" y="160" width="30" height="60" rx="15" fill="#6366F1"/>
+  <rect x="347" y="160" width="30" height="60" rx="15" fill="#6366F1"/>
+
+  <!-- Mascot Body -->
+  <path d="M256 120 C140 120 70 200 70 310 C70 410 145 440 256 440 C367 440 442 410 442 310 C442 200 372 120 256 120 Z" fill="url(#blob)"/>
+
+  <!-- Happy Curved Eyes -->
+  <path d="M165 270 C180 240, 215 240, 230 270" stroke="#0F172A" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M282 270 C297 240, 332 240, 347 270" stroke="#0F172A" stroke-width="18" stroke-linecap="round" fill="none"/>
+
+  <!-- Cheerful Open Mouth -->
+  <path d="M226 315 C226 360, 286 360, 286 315 Z" fill="#F43F5E"/>
+
+  <!-- Pink Blushing Cheeks -->
+  <circle cx="145" cy="315" r="22" fill="#FDA4AF" opacity="0.85"/>
+  <circle cx="367" cy="315" r="22" fill="#FDA4AF" opacity="0.85"/>
+</svg>
