@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { DifficultyLevel, PetState, UpdateInfo, UpdateProgress } from '../types';
-import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
+import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal, recordDebriefReward, updateJournal } from './journal';
 import { MyDuck } from './MyDuck';
 import { CameraScreen } from './CameraScreen';
 import type { ForcedActivity } from './PixelMascot';
@@ -16,6 +16,7 @@ import {
   canFeed,
   cornInterval,
   cornNeeded,
+  earnCorn,
   grantCorn,
   HATCH_LEVEL,
   NEW_PET,
@@ -310,6 +311,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [sessionSummary, setSessionSummary] = useState<string>('Analyzing your focus session...');
   const [tigerStats, setTigerStats] = useState<any>(null);
 
+  const [isSendingDebrief, setIsSendingDebrief] = useState(false);
+  const [debriefSent, setDebriefSent] = useState(false);
+  const [debriefStatus, setDebriefStatus] = useState<string | null>(null);
+
+  const handleSendDebrief = async () => {
+    if (isSendingDebrief || debriefSent) return;
+    setIsSendingDebrief(true);
+    setDebriefStatus(null);
+    try {
+      const res = await fetch(`http://localhost:8000/grok-bot/webhook?session_id=${encodeURIComponent(sessionId)}`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.dispatched) {
+        updateJournal((j) => recordDebriefReward(j, 5));
+        if (onPetChange) onPetChange((p) => earnCorn(p, 5));
+        setDebriefSent(true);
+        setDebriefStatus('Achievement medal & $0 desk diagnosis dispatched! +5 🌽 added to your pantry.');
+      } else if (res.status === 429) {
+        setDebriefStatus(data.detail || 'Rate limit active: please wait 10s between dispatches.');
+      } else {
+        setDebriefStatus(data.reason ? `Dispatch note: ${data.reason}` : 'Session summary logged (no external webhook configured).');
+      }
+    } catch (err) {
+      setDebriefStatus('Backend service offline or unreachable.');
+    } finally {
+      setIsSendingDebrief(false);
+    }
+  };
+
   // Fetch 30-minute series and summary from backend
   useEffect(() => {
     const fetchData = async () => {
@@ -502,10 +533,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {activeTab === 'analytics' && (
             <>
               <div className={`${CALLOUT} px-5 py-4`}>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-1.5">
-                  ✨ Google Gemini coach brief
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-1.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)]">
+                    ✨ Google Gemini coach brief
+                  </h3>
+                  <button
+                    onClick={handleSendDebrief}
+                    disabled={isSendingDebrief || debriefSent}
+                    className={`text-xs px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                      debriefSent
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 cursor-default'
+                        : isSendingDebrief
+                        ? 'bg-[var(--chip)] text-[var(--muted)] border border-[var(--line)] cursor-wait'
+                        : 'bg-[var(--accent)] text-[var(--accent-ink)] hover:brightness-110 shadow-sm active:scale-95'
+                    }`}
+                  >
+                    {debriefSent ? (
+                      <>✅ Debrief Sent (+5 🌽 Claimed!)</>
+                    ) : isSendingDebrief ? (
+                      <>⏳ Dispatching...</>
+                    ) : (
+                      <>🚀 Dispatch Grok Debrief (+5 🌽)</>
+                    )}
+                  </button>
+                </div>
                 <p className={`text-sm italic ${MUTED}`}>"{sessionSummary}"</p>
+                {debriefStatus && (
+                  <p className="text-xs text-[var(--accent)] font-semibold mt-2">
+                    {debriefStatus}
+                  </p>
+                )}
               </div>
 
               <div className={`${CARD} p-5`}>

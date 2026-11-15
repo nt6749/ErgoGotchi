@@ -156,6 +156,21 @@ export function recordGame(events: Events, score: number, day: string = dayKey()
   return { ...next, life: { ...next.life, games: next.life.games + 1, gameBest: Math.max(next.life.gameBest, score) } };
 }
 
+/**
+ * Credit bonus corn when the user finishes and dispatches an end-of-session debrief.
+ * Keeps journal.ts 100% pure and compatible with existing localStorage data.
+ */
+export function recordDebriefReward(
+  journal: Journal,
+  bonusCorn: number = 5,
+  day: string = dayKey()
+): Journal {
+  const safeCorn = Math.max(0, Math.round(bonusCorn));
+  const d: DayStats = { ...statsFor(journal, day) };
+  d.cornFromSitting += safeCorn;
+  return { ...journal, days: prune({ ...journal.days, [day]: d }) };
+}
+
 // ---------------------------------------------------------------- daily quests
 export interface Quest {
   id: string;

@@ -101,6 +101,12 @@ def _safe_float(val: Any, default: float) -> float:
         return default
 
 
+def _fmt_pct(val: Any) -> str:
+    """Format a drift ratio (e.g. 0.042 -> '+4.2%', -0.012 -> '-1.2%', -0.0001 -> '+0.0%')."""
+    pct = round(_safe_float(val, 0.0) * 100.0, 1) + 0.0
+    return f"{pct:+.1f}%"
+
+
 def _ascii_header(val: str) -> str:
     """Strip non-ASCII characters so httpx HTTP/1.1 headers never raise UnicodeEncodeError."""
     return val.encode("ascii", errors="ignore").decode("ascii").strip()
@@ -108,26 +114,26 @@ def _ascii_header(val: str) -> str:
 
 def _get_medal_tier(min_hp: int, avg_strain: float, fhead: float) -> tuple[str, str, int, str]:
     """Return (display_title, rank_label, embed_color_int, ntfy_tags) from session telemetry."""
-    f_pct = fhead * 100.0
+    f_str = _fmt_pct(fhead)
     if min_hp >= 80 and avg_strain < 0.30:
         return (
-            f"🏆 Achievement Unlocked: Zero-Point Sniper (+{f_pct:.1f}% Drift)",
-            f"🥇 Gold Calibration · {max(0, 100 - int(avg_strain * 100))}% Baseline Lock",
+            f"🏆 Achievement Unlocked: Zero-Point Sniper ({f_str} Drift)",
+            f"🥇 Gold Medal · {max(0, 100 - int(avg_strain * 100))}% Baseline Lock",
             16766720,  # Gold (#FFD700)
-            "trophy,sparkles",
+            "trophy,sparkles,hatching_chick",
         )
     if min_hp >= 50:
         return (
             f"🥈 Achievement Unlocked: Desk Guardian ({min_hp} HP Floor)",
             "🥈 Silver Posture Medal",
             3066993,   # Emerald (#2ECC71)
-            "medal_sports,white_check_mark",
+            "medal_sports,white_check_mark,hatching_chick",
         )
     return (
         "🎖️ Achievement Unlocked: The Backflip Revival!",
         "🥉 Resilience & Recovery Badge",
         10181046,  # Purple (#9B59B6)
-        "military_medal,muscle",
+        "military_medal,muscle,hatching_chick",
     )
 
 
@@ -223,27 +229,23 @@ class GrokBotService:
         sid_short = str(session_id or "session")[:8]
         clean_summary = str(summary_text or "Bobi survived another coding session by your side!")
 
-        reward_text = (
-            f"{title}\n"
-            f"Rank: {rank} (Session {sid_short})\n"
-            f"\"{clean_summary}\"\n\n"
-            f"📊 Biometric Telemetry ({minutes}m):\n"
-            f"• 📐 Baseline Drift: +{fhead_drift * 100:.1f}% Fwd Head | +{hdrop_drift * 100:.1f}% Head Drop\n"
-            f"• 👾 Bobi HP Floor: {min_hp}/100 | 🧬 Strain: {avg_strain:.2f} ({strain_label}) | 👁️ Blinks: {avg_blink:.1f} bpm\n\n"
-            f"🔧 Desk-Setup Diagnosis [{diagnosis['code']}]: {diagnosis['cause']}\n"
-            f"💡 $0 Instant Fix: {diagnosis['fix']}\n"
-            f"🎯 Next-Session Quest: {diagnosis['quest']}"
+        # Compact 4-line text for ntfy.sh / Slack / Google Chat (readable on any phone lock screen)
+        compact_text = (
+            f"\"{clean_summary}\"\n"
+            f"📊 {minutes}m Sprint • {min_hp}% Min HP • {_fmt_pct(fhead_drift)} Fwd / {_fmt_pct(hdrop_drift)} Drop • {avg_blink:.1f} bpm\n"
+            f"🔧 Fix [{diagnosis['code']}]: {diagnosis['fix']}\n"
+            f"🎯 Next Quest: {diagnosis['quest']}"
         )
 
         url_lower = url.lower()
         client = self._get_client()
 
         try:
-            # 1. ntfy.sh: strictly ASCII headers + UTF-8 body
+            # 1. ntfy.sh: 4-line plain-text mobile toast + ASCII-safe headers
             if "ntfy.sh" in url_lower:
                 res = await client.post(
                     url,
-                    content=reward_text.encode("utf-8"),
+                    content=compact_text.encode("utf-8"),
                     headers={
                         "Title": _ascii_header(f"{title} ({sid_short})") or f"ErgoGotchi ({sid_short})",
                         "Priority": "default",
@@ -253,12 +255,12 @@ class GrokBotService:
 
             # 2. Google Chat & Slack: strict {"text": ...} schema (no Discord keys)
             elif "chat.googleapis.com" in url_lower or "slack.com" in url_lower:
-                res = await client.post(url, json={"text": reward_text})
+                res = await client.post(url, json={"text": f"*{title}* ({rank})\n{compact_text}"})
 
             # 3. Discord, Mattermost, webhook.site, httpbin.org
             else:
                 payload = {
-                    "text": reward_text,
+                    "text": f"{title}\n{compact_text}",
                     "content": f"✨ **{title}**",
                     "embeds": [
                         {
@@ -268,7 +270,7 @@ class GrokBotService:
                             "fields": [
                                 {
                                     "name": "📐 Baseline Drift (F0 / D0)",
-                                    "value": f"**+{fhead_drift * 100:.1f}%** Fwd · **+{hdrop_drift * 100:.1f}%** Drop",
+                                    "value": f"**{_fmt_pct(fhead_drift)}** Fwd · **{_fmt_pct(hdrop_drift)}** Drop",
                                     "inline": True,
                                 },
                                 {
