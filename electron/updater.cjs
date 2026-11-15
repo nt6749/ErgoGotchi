@@ -2,7 +2,7 @@
  * updater.cjs
  *
  * Native GitHub Release Auto-Updater & System Startup Manager for ErgoGotchi.
- *  1. Checks https://api.github.com/repos/nt6749/sunhacks-project2/releases/latest
+ *  1. Checks https://api.github.com/repos/nt6749/ErgoGotchi/releases/latest
  *  2. Compares semver tags against app.getVersion()
  *  3. Downloads installer asset with real-time progress tracking
  *  4. Spawns installer detached and restarts ErgoGotchi
@@ -17,7 +17,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 
 const REPO_OWNER = 'nt6749';
-const REPO_NAME = 'sunhacks-project2';
+const REPO_NAME = 'ErgoGotchi';
 const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
 
 let appVersion = '1.0.2';

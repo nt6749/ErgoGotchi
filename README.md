@@ -1,27 +1,27 @@
 # 👾 ErgoGotchi (ErgoBuddy)
 ### Biometric Desktop Companion & Ergonomic Telemetry Engine
-> **sunhacks 2026** · Target Tracks: **Best Mascot**, **Future of Work (JFFVentures)**, **Best Use of Gemini API**, **Best Use of Tiger Data**, **Best Gaming**, **Best Use of Vultr**, **SpaceXSI A-Team**.
+> **sunhacks 2026** · Target Tracks: **Best Mascot**, **Future of Work (JFFVentures)**, **Best Use of Gemini API**, **Best Use of Tiger Data**, **Best Gaming**, **SpaceXSI A-Team**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Google Gemini](https://img.shields.io/badge/Google%20Gemini-Powered-blue)](https://ai.google.dev/)
 [![Tiger Data](https://img.shields.io/badge/Tiger%20Data-TimescaleDB%20Hypertables-orange)](https://www.tigerdata.com/)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Edge%20Biometrics-cyan)](https://developers.google.com/mediapipe)
-[![Release](https://img.shields.io/github/v/release/nt6749/sunhacks-project2?color=emerald&label=Latest%20Release)](https://github.com/nt6749/sunhacks-project2/releases)
-[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-blue?logo=windows)](https://github.com/nt6749/sunhacks-project2/releases/latest)
-[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/sunhacks-project2/releases/latest)
+[![Release](https://img.shields.io/github/v/release/nt6749/ErgoGotchi?color=emerald&label=Latest%20Release)](https://github.com/nt6749/ErgoGotchi/releases)
+[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-blue?logo=windows)](https://github.com/nt6749/ErgoGotchi/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/ErgoGotchi/releases/latest)
 
 ---
 
 ### ⚡ Quick Downloads & Play (Hackathon Judges & Users)
 
-> 🚀 **[📥 Download Latest Official Release from GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** — Ready-to-run compiled binaries for Windows and macOS.
+> 🚀 **[📥 Download Latest Official Release from GitHub Releases](https://github.com/nt6749/ErgoGotchi/releases)** — Ready-to-run compiled binaries for Windows and macOS.
 
 | Platform | Recommended Installer | Alternative / Portable | Status |
 | :--- | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.3 Ready` |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 All Release Assets](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.3 Ready` |
+| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/ErgoGotchi/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/ErgoGotchi/releases) | `v1.0.3 Ready` |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/ErgoGotchi/releases) | [📦 All Release Assets](https://github.com/nt6749/ErgoGotchi/releases) | `v1.0.3 Ready` |
 
-> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.3.exe`), Portable (`ErgoGotchi-Portable-1.0.3.exe`), and macOS Disk Image (`ErgoGotchi-1.0.3.dmg`).
+> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/ErgoGotchi/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.3.exe`), Portable (`ErgoGotchi-Portable-1.0.3.exe`), and macOS Disk Image (`ErgoGotchi-1.0.3.dmg`).
 
 ---
 
@@ -61,7 +61,7 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
                                                   │
                                                   │ WebSockets (WSS)
                                                   ▼
-     ┌────────────────────── CLOUD / BACKEND (VULTR) ──────────────────────┐
+     ┌────────────────────── CLOUD / BACKEND (Docker) ──────────────────────┐
      │                                                                     │
      │                   FastAPI WebSocket & Relay Server                  │
      │                                    │                                │
@@ -104,7 +104,6 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
 | ♊ **Best Use of Gemini API** | MLH Swag Kits & Honors | Gemini powers the pet’s personality engine with structured JSON responses, serving snappy, context-aware roasts and clinically grounded micro-stretch biomechanical cues. |
 | 🐅 **Best Use of Tiger Data** | Stream Deck Mini | Ingests continuous 1 Hz telemetry into PostgreSQL hypertables; leverages `timescaledb.continuous` 1-minute materialized views (`ergo_1min`) and `LAG()` window functions to compute real-time strain velocity. |
 | 🎮 **Best Gaming** | Gaming Track | Virtual pet survival gameplay: 0–100 HP decay curve, level-ups, posture discipline XP, and death/revival state mechanics. |
-| ☁️ **Best Use of Vultr** | IoT Kit / Cloud Awards | Full Docker Compose deployment blueprint provisioning TimescaleDB and the FastAPI telemetry service on Vultr High-Frequency Compute. |
 | 🚀 **SpaceXSI A-Team** | Mechanical Keyboards | Automated Grok Bot webhook service generating personal, opt-in daily focus and posture summaries in Discord/Slack. |
 
 ---
@@ -144,8 +143,8 @@ Choose the method that works best for you:
 
 | Platform | Installer File | Installation Steps |
 | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Windows Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Download installer wizard.<br>2. Run the `.exe` installer wizard.<br>3. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>4. Check "Create Desktop Shortcut".<br>5. Click **Install** & launch! |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download macOS Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
+| **🪟 Windows (10/11)** | [📥 **Download Windows Setup Wizard (`.exe`)**](https://github.com/nt6749/ErgoGotchi/releases) | 1. Download installer wizard.<br>2. Run the `.exe` installer wizard.<br>3. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>4. Check "Create Desktop Shortcut".<br>5. Click **Install** & launch! |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download macOS Disk Image (`.dmg`)**](https://github.com/nt6749/ErgoGotchi/releases) | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
 
 #### 🪄 The First-Run Onboarding Wizard
 When you open ErgoGotchi for the first time, a cute setup wizard appears:
@@ -168,8 +167,8 @@ When you open ErgoGotchi for the first time, a cute setup wizard appears:
 
 #### 1. Clone & Set Up Environment
 ```bash
-git clone https://github.com/nt6749/sunhacks-project2.git
-cd sunhacks-project2
+git clone https://github.com/nt6749/ErgoGotchi.git
+cd ErgoGotchi
 cp .env.example .env
 ```
 

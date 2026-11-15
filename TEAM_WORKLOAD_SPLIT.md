@@ -7,7 +7,7 @@
 ## 🗺️ Clean Folder & Ownership Map
 
 ```
-sunhacks-project2/
+ErgoGotchi/
 │
 ├── 📂 src/dev1_sensing_and_scoring/    ──► DEVELOPER 1 (Sensing, Biometrics & Scoring)
 │   ├── visionPipeline.ts                 • MediaPipe Face (478 pts) & Pose (33 pts)
@@ -48,8 +48,8 @@ sunhacks-project2/
 ## 🧑‍💻 The 3 Developer Assignments
 
 ### 👁️ Developer 1: Sensing, Biometrics & Scoring Engine
-- **Directory**: [`src/dev1_sensing_and_scoring/`](file:///Users/nigeltang/Coding/sunhacks2/sunhacks-project2/src/dev1_sensing_and_scoring/)
-- **Guide**: [dev1_sensing_and_scoring/README.md](file:///Users/nigeltang/Coding/sunhacks2/sunhacks-project2/src/dev1_sensing_and_scoring/README.md)
+- **Directory**: [`src/dev1_sensing_and_scoring/`](src/dev1_sensing_and_scoring/)
+- **Guide**: [dev1_sensing_and_scoring/README.md](src/dev1_sensing_and_scoring/README.md)
 - **Target Tracks**: Future of Work (JFFVentures), Gaming
 - **Tonight's Tasks**:
   1. **Threshold Tuning**: Test the calibration and sensitivity with all 3 teammates (with glasses, without glasses, different lighting).
@@ -60,8 +60,8 @@ sunhacks-project2/
 ---
 
 ### 🦫 Developer 2: Mascot Experience, Desktop Shell & Dashboard
-- **Directory**: [`src/dev2_mascot_and_ui/`](file:///Users/nigeltang/Coding/sunhacks2/sunhacks-project2/src/dev2_mascot_and_ui/) & [`electron/`](file:///Users/nigeltang/Coding/sunhacks2/sunhacks-project2/electron/)
-- **Guide**: [dev2_mascot_and_ui/README.md](file:///Users/nigeltang/Coding/sunhacks2/sunhacks-project2/src/dev2_mascot_and_ui/README.md)
+- **Directory**: [`src/dev2_mascot_and_ui/`](src/dev2_mascot_and_ui/) & [`electron/`](electron/)
+- **Guide**: [dev2_mascot_and_ui/README.md](src/dev2_mascot_and_ui/README.md)
 - **Target Tracks**: Best Mascot (Buc-ee's + XPPen Tablets), Future of Work
 - **Tonight's Tasks**:
   1. **Animation Polish**: Fine-tune the timing of the **360° backflip** (`animate-backflip`), wobble puddle, and floating hearts.
@@ -72,8 +72,8 @@ sunhacks-project2/
 ---
 
 ### 🐅 Developer 3: Cloud Brain, Tiger Data (TimescaleDB) & Gemini
-- **Directory**: [`backend/`](file:///Users/nigeltang/Coding/sunhacks2/sunhacks-project2/backend/)
-- **Guide**: [backend/DEV3_BACKEND_GUIDE.md](file:///Users/nigeltang/Coding/sunhacks2/sunhacks-project2/backend/DEV3_BACKEND_GUIDE.md)
+- **Directory**: [`backend/`](backend/)
+- **Guide**: [backend/DEV3_BACKEND_GUIDE.md](backend/DEV3_BACKEND_GUIDE.md)
 - **Target Tracks**: Best Use of Gemini API, Best Use of Tiger Data, Best Use of Vultr, SpaceXSI A-Team
 - **Tonight's Tasks**:
   1. **Gemini API Key**: Place your `GEMINI_API_KEY` into `.env` and verify that startup pre-warms 8 lines per cue.
