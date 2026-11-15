@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { PetState } from '../types';
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
 import { MyDuck } from './MyDuck';
+import { DEFAULT_SKIN, type EggShellSkin } from './eggShellSkins';
 import type { ForcedActivity } from './PixelMascot';
 import {
   ADULT_LEVEL,
@@ -93,6 +94,14 @@ interface DashboardProps {
   // Light / dark mode
   theme?: ThemeMode;
   onToggleTheme?: () => void;
+
+  // Position lock mode
+  isLocked?: boolean;
+  onToggleLock?: (locked: boolean) => void;
+
+  // Egg Shell Skin
+  skin?: EggShellSkin;
+  onSelectSkin?: (skin: EggShellSkin) => void;
 }
 
 type TabId = 'analytics' | 'myduck' | 'quests' | 'tigerdata' | 'demo';
@@ -158,6 +167,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onEventsChange = () => {},
   theme = 'dark',
   onToggleTheme,
+  isLocked = true,
+  onToggleLock,
+  skin = DEFAULT_SKIN,
+  onSelectSkin,
 }) => {
   const [activeTab, setActiveTab] = useState<TabId>('analytics');
   const [seriesData, setSeriesData] = useState<any[]>([]);
@@ -405,7 +418,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* My DuckDuck: profile + wardrobe */}
           {activeTab === 'myduck' && (
-            <MyDuck pet={pet} onPetChange={onPetChange} onFeed={onFeed} cornEverySeconds={cornInterval(isDemoMode)} />
+            <MyDuck
+              pet={pet}
+              onPetChange={onPetChange}
+              onFeed={onFeed}
+              cornEverySeconds={cornInterval(isDemoMode)}
+              isLocked={isLocked}
+              onToggleLock={onToggleLock}
+              skin={skin}
+              onSelectSkin={onSelectSkin}
+            />
           )}
 
           {/* Quests: daily quests, games, achievements, session report, stretches */}

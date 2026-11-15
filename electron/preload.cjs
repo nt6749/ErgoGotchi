@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   movePet: (x, y) => ipcRenderer.send('pet-move', { x, y }),
+  movePetBy: (dx, dy) => ipcRenderer.send('pet-move-by', { dx, dy }),
   setPetBounds: (bounds) => ipcRenderer.send('pet-set-bounds', bounds),
   openDashboard: () => ipcRenderer.send('open-dashboard'),
   setIgnoreMouse: (ignore) => ipcRenderer.send('pet-ignore-mouse', ignore),
@@ -11,6 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onToggleDemoMode: (callback) => ipcRenderer.on('menu-toggle-demo', callback),
   setCameraList: (cameras, activeId) => ipcRenderer.send('camera-list', { cameras, activeId }),
   onSelectCamera: (callback) => ipcRenderer.on('menu-select-camera', (event, deviceId) => callback(deviceId)),
+  onToggleLock: (callback) => ipcRenderer.on('menu-toggle-lock', (event, locked) => callback(locked)),
+  setLocked: (locked) => ipcRenderer.send('pet-set-locked', locked),
+  onFeedDuck: (callback) => ipcRenderer.on('menu-feed-duck', callback),
   onActivity: (callback) => ipcRenderer.on('activity', (event, activity) => callback(activity)),
   onForceActivity: (callback) => ipcRenderer.on('menu-force-activity', (event, value) => callback(value)),
   onAddCorn: (callback) => ipcRenderer.on('menu-add-corn', (event, amount) => callback(amount)),

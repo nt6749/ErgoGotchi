@@ -105,6 +105,26 @@
     100% { transform: translate(var(--dx), var(--dy)) scale(1.2); opacity: 0; }
   }
 
+  /* Hearts floating up when petting the duck */
+  @keyframes heartFloat {
+    0% {
+      opacity: 1;
+      transform: translate(0, 0) scale(0.5) rotate(0deg);
+    }
+    40% {
+      opacity: 1;
+      transform: translate(var(--hx), var(--hy)) scale(1.3) rotate(var(--hrot));
+    }
+    100% {
+      opacity: 0;
+      transform: translate(calc(var(--hx) * 1.5), calc(var(--hy) - 36px)) scale(0.7) rotate(calc(var(--hrot) * 1.5));
+    }
+  }
+
+  .animate-heart-float {
+    animation: heartFloat 1.1s ease-out forwards;
+  }
+
   /* Feeding: corn flies in from --dx / --dy and vanishes into the pet */
   @keyframes cornFly {
     0% { transform: translate(var(--dx), var(--dy)) scale(1.1); opacity: 0; }

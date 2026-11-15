@@ -14,6 +14,8 @@ const { startActivityWatcher } = require('./activityWatcher.cjs');
 let petWindow = null;
 let dashboardWindow = null;
 let backendProcess = null;
+let isWizardActive = false;
+let isPetLocked = true;
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
@@ -98,9 +100,9 @@ function createPetWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
 
-  // Room for the mascot's ±40px wander and the speech bubble above it
-  const initialWidth = 280;
-  const initialHeight = 320;
+  // Room for the egg machine and the speech bubble above it
+  const initialWidth = 320;
+  const initialHeight = 460;
   const initialX = screenWidth - initialWidth - 60;
   const initialY = screenHeight - initialHeight - 10;
 
@@ -160,6 +162,18 @@ function createPetWindow() {
         click: () => createDashboardWindow(),
       },
       {
+        label: isPetLocked ? '🔓 Unlock Position (Move Duck)' : '🔒 Lock Position',
+        click: () => {
+          isPetLocked = !isPetLocked;
+          petWindow.webContents.send('menu-toggle-lock', isPetLocked);
+        },
+      },
+      {
+        label: '🌾 Feed Duck (🌽)',
+        click: () => petWindow.webContents.send('menu-feed-duck'),
+      },
+      { type: 'separator' },
+      {
         label: '⚡ Toggle Demo Mode (D)',
         click: () => petWindow.webContents.send('menu-toggle-demo'),
       },
@@ -189,22 +203,10 @@ function createPetWindow() {
       {
         label: '🥚 Growth',
         submenu: [
+          { label: 'Feed Duck (🌽)', click: () => petWindow.webContents.send('menu-feed-duck') },
           { label: 'Give 10 corn (demo)', click: () => petWindow.webContents.send('menu-add-corn', 10) },
           { label: 'Start over as an egg', click: () => petWindow.webContents.send('menu-reset-growth') },
         ],
-      },
-      { type: 'separator' },
-      {
-        label: 'Force State: Thriving [1]',
-        click: () => petWindow.webContents.send('menu-force-state', 'THRIVING'),
-      },
-      {
-        label: 'Force State: Slouching [2]',
-        click: () => petWindow.webContents.send('menu-force-state', 'SLOUCHING'),
-      },
-      {
-        label: 'Force State: Wilted [3]',
-        click: () => petWindow.webContents.send('menu-force-state', 'WILTED'),
       },
       { type: 'separator' },
       {
@@ -261,6 +263,12 @@ ipcMain.on('pet-move', (event, { x, y }) => {
   }
 });
 
+ipcMain.on('pet-move-by', (event, { dx, dy }) => {
+  if (!petWindow) return;
+  const [x, y] = petWindow.getPosition();
+  petWindow.setPosition(Math.round(x + dx), Math.round(y + dy));
+});
+
 ipcMain.on('pet-set-bounds', (event, bounds) => {
   if (!petWindow) return;
   if (bounds.center) {
@@ -289,11 +297,15 @@ ipcMain.on('pet-dock-corner', () => {
   if (!petWindow) return;
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
-  const initialWidth = 280;
-  const initialHeight = 320;
+  const initialWidth = 320;
+  const initialHeight = 460;
   const initialX = screenWidth - initialWidth - 60;
   const initialY = screenHeight - initialHeight - 10;
   petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
+});
+
+ipcMain.on('pet-set-locked', (event, locked) => {
+  isPetLocked = !!locked;
 });
 
 ipcMain.on('pet-ignore-mouse', (event, ignore) => {
