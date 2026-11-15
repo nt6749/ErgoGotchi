@@ -40,6 +40,9 @@ class DatabaseManager:
 
     async def connect(self):
         """Attempt PostgreSQL/TimescaleDB connection; fall back to local SQLite if unavailable."""
+        if self.pool or self.sqlite_conn:
+            await self.close()
+
         if HAS_ASYNCPG and settings.DATABASE_URL:
             try:
                 self.pool = await asyncpg.create_pool(

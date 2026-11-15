@@ -400,48 +400,53 @@ def test_sqlite_batch_insert_and_time_filtering():
 def test_database_close_lifecycle():
     """Verify db.connect() and db.close() executes cleanly with no lingering locks."""
     logger.info("Executing test_database_close_lifecycle...")
-    asyncio.run(db.connect())
-    assert db.sqlite_conn is not None or db.pool is not None
-    asyncio.run(db.close())
-    assert db.pool is None
-    assert db.sqlite_conn is None
+    async def _run():
+        await db.connect()
+        assert db.sqlite_conn is not None or db.pool is not None
+        await db.close()
+        assert db.pool is None
+        assert db.sqlite_conn is None
+    asyncio.run(_run())
     logger.info("-> Cleanly opened and closed database lifecycle.")
 
 
 def test_db_zero_hp_preservation_and_float_batch():
     """Verify 0 HP does not become 100 HP and batch insert handles floats/deduping."""
     logger.info("Executing test_db_zero_hp_preservation_and_float_batch...")
-    asyncio.run(db.connect())
-    try:
-        now_ts = datetime.now(timezone.utc).isoformat()
-        records = [
-            {
-                "session_id": "test-zero-hp-session",
-                "recorded_at": now_ts,
-                "present": True,
-                "blink_rate_1m": 8.5,
-                "hp": 0.0,
-                "strain_index": 0.9,
-                "state": "WILTED"
-            },
-            # Duplicate (session_id, recorded_at) to verify deduping
-            {
-                "session_id": "test-zero-hp-session",
-                "recorded_at": now_ts,
-                "present": True,
-                "blink_rate_1m": 9.2,
-                "hp": 0.0,
-                "strain_index": 0.95,
-                "state": "WILTED"
-            }
-        ]
-        asyncio.run(db.insert_telemetry_batch(records))
-        series = asyncio.run(db.get_series("test-zero-hp-session", minutes=30))
-        assert len(series) >= 1
-        assert series[-1]["min_hp"] == 0, f"Expected min_hp == 0, got {series[-1]['min_hp']}"
-        logger.info("-> Successfully preserved 0 HP and handled float batch ingestion.")
-    finally:
-        asyncio.run(db.close())
+    async def _run():
+        await db.connect()
+        try:
+            now_ts = datetime.now(timezone.utc).isoformat()
+            records = [
+                {
+                    "session_id": "test-zero-hp-session",
+                    "recorded_at": now_ts,
+                    "present": True,
+                    "blink_rate_1m": 8.5,
+                    "hp": 0.0,
+                    "strain_index": 0.9,
+                    "state": "WILTED"
+                },
+                # Duplicate (session_id, recorded_at) to verify deduping
+                {
+                    "session_id": "test-zero-hp-session",
+                    "recorded_at": now_ts,
+                    "present": True,
+                    "blink_rate_1m": 9.2,
+                    "hp": 0.0,
+                    "strain_index": 0.95,
+                    "state": "WILTED"
+                }
+            ]
+            await db.insert_telemetry_batch(records)
+            series = await db.get_series("test-zero-hp-session", minutes=30)
+            assert len(series) >= 1
+            assert series[-1]["min_hp"] == 0, f"Expected min_hp == 0, got {series[-1]['min_hp']}"
+            logger.info("-> Successfully preserved 0 HP and handled float batch ingestion.")
+        finally:
+            await db.close()
+
+    asyncio.run(_run())
 
 
 # ============================================================================
