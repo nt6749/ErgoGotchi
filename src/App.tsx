@@ -39,6 +39,7 @@ import {
   type PetProfile,
 } from './dev2_mascot_and_ui/progression';
 import { OnboardingWizard, ONBOARDING_STORAGE_KEY } from './dev2_mascot_and_ui/OnboardingWizard';
+import { DEFAULT_SKIN, loadStoredSkin, saveStoredSkin, SKIN_STORAGE_KEY, type EggShellSkin } from './dev2_mascot_and_ui/eggShellSkins';
 
 /** Posture warnings clear after this many consecutive seconds of good posture. */
 const CLEAR_WARNING_AFTER_GOOD_SECONDS = 2;
@@ -83,6 +84,9 @@ interface ElectronAPI {
   onSetDifficulty?: (cb: (level: DifficultyLevel) => void) => void;
   centerPet?: (width?: number, height?: number) => void;
   dockPet?: () => void;
+  onToggleLock?: (cb: (locked: boolean) => void) => void;
+  setLocked?: (locked: boolean) => void;
+  onFeedDuck?: (cb: () => void) => void;
   movePet?: (x: number, y: number, save?: boolean) => void;
   movePetBy?: (dx: number, dy: number, save?: boolean) => void;
   getPetPosition?: () => Promise<{ x: number; y: number }>;
@@ -113,7 +117,11 @@ type PresenterMessage =
   | { type: 'set'; patch: Partial<PresenterState> }
   | { type: 'hello' }
   | { type: 'recalibrate' }
-  | { type: 'warning' };
+  | { type: 'warning' }
+  | { type: 'lock'; locked: boolean }
+  | { type: 'skin'; skin: EggShellSkin }
+  | { type: 'scoring'; state: PetState; hp: number; strainIndex?: number }
+  | { type: 'feed' };
 const presenterChannel: BroadcastChannel | null =
   typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('ergogotchi-presenter');
 
@@ -168,6 +176,30 @@ export const App: React.FC = () => {
       return false;
     }
   });
+  const [isLocked, setIsLocked] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ergogotchi_pet_locked');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleLock = (locked: boolean) => {
+    setIsLocked(locked);
+    try {
+      localStorage.setItem('ergogotchi_pet_locked', String(locked));
+    } catch {}
+    electronAPI?.setLocked?.(locked);
+    presenterChannel?.postMessage({ type: 'lock', locked });
+  };
+
+  const [eggShellSkin, setEggShellSkin] = useState<EggShellSkin>(() => loadStoredSkin());
+  const handleSelectSkin = (skin: EggShellSkin) => {
+    setEggShellSkin(skin);
+    saveStoredSkin(skin);
+    presenterChannel?.postMessage({ type: 'skin', skin });
+  };
 
   // Scoring and biometric state
   const [scoringState, setScoringState] = useState<ScoringState>(createInitialState());
@@ -299,7 +331,11 @@ export const App: React.FC = () => {
 
     if (!visionStarted) {
       visionStarted = true;
-      initVision();
+      if (awardsCorn) {
+        initVision();
+      } else {
+        refreshCameras();
+      }
     }
   }, []);
 
@@ -474,6 +510,10 @@ export const App: React.FC = () => {
 
   // 2. 1-Hz Scoring & Telemetry Dispatch Loop
   useEffect(() => {
+    // Only the primary window (pet window in Electron, or plain browser preview)
+    // runs the scoring & telemetry loop. The dashboard window receives synced scoring over IPC.
+    if (!awardsCorn) return;
+
     const loopInterval = setInterval(() => {
       const params: ScoringParams = isDemoModeRef.current 
         ? DEMO_PARAMS 
@@ -502,6 +542,12 @@ export const App: React.FC = () => {
       }
 
       setScoringState(next);
+      presenterChannel?.postMessage({
+        type: 'scoring',
+        state: next.state,
+        hp: next.hp,
+        strainIndex: next.strainIndex,
+      } satisfies PresenterMessage);
 
       // Sitting upright earns corn: one for every stretch of good posture
       if (awardsCorn) {
@@ -574,7 +620,14 @@ export const App: React.FC = () => {
 
   // Presenter controls: apply here and tell the other window
   const applyPresenter = (patch: Partial<PresenterState>) => {
-    if ('forcedState' in patch) setForcedState(patch.forcedState ?? null);
+    if ('forcedState' in patch) {
+      const s = patch.forcedState ?? null;
+      setForcedState(s);
+      if (s) {
+        const h = s === 'THRIVING' ? 95 : s === 'NEUTRAL' ? 75 : s === 'SLOUCHING' ? 45 : 15;
+        setScoringState((prev) => ({ ...prev, state: s, hp: h }));
+      }
+    }
     if (patch.forcedActivity) setForcedActivity(patch.forcedActivity);
     if (typeof patch.demoMode === 'boolean') setIsDemoMode(patch.demoMode);
   };
@@ -602,9 +655,31 @@ export const App: React.FC = () => {
     const onMessage = (e: MessageEvent<PresenterMessage>) => {
       const msg = e.data;
       if (msg.type === 'set') applyPresenter(msg.patch);
-      else if (msg.type === 'recalibrate') handleRecalibrate();
+      else if (msg.type === 'scoring') {
+        if (!awardsCorn) {
+          setScoringState((prev) => ({
+            ...prev,
+            state: msg.state,
+            hp: msg.hp,
+            strainIndex: msg.strainIndex ?? prev.strainIndex,
+          }));
+        }
+      }
+      else if (msg.type === 'recalibrate') {
+        if (awardsCorn) handleRecalibrate();
+      }
       else if (msg.type === 'warning') showWarning();
-      else if (msg.type === 'hello') {
+      else if (msg.type === 'lock') {
+        setIsLocked(msg.locked);
+        try {
+          localStorage.setItem('ergogotchi_pet_locked', String(msg.locked));
+        } catch {}
+      } else if (msg.type === 'feed') {
+        handleFeed();
+      } else if (msg.type === 'skin') {
+        setEggShellSkin(msg.skin);
+        saveStoredSkin(msg.skin);
+      } else if (msg.type === 'hello') {
         // A window just opened: send it the current controls
         presenterChannel.postMessage({
           type: 'set',
@@ -614,6 +689,14 @@ export const App: React.FC = () => {
             demoMode: isDemoModeRef.current,
           },
         } satisfies PresenterMessage);
+        if (awardsCorn) {
+          presenterChannel.postMessage({
+            type: 'scoring',
+            state: scoringStateRef.current.state,
+            hp: scoringStateRef.current.hp,
+            strainIndex: scoringStateRef.current.strainIndex,
+          } satisfies PresenterMessage);
+        }
       }
     };
     presenterChannel.addEventListener('message', onMessage);
@@ -664,6 +747,15 @@ export const App: React.FC = () => {
     electronAPI.onForceState((s) => forceState(s));
     electronAPI.onToggleDemoMode(() => toggleDemoMode());
     electronAPI.onOpenWizard?.(() => setShowWizard(true));
+    electronAPI.onToggleLock?.((locked) => {
+      setIsLocked(locked);
+      try {
+        localStorage.setItem('ergogotchi_pet_locked', String(locked));
+      } catch {}
+    });
+    electronAPI.onFeedDuck?.(() => {
+      handleFeed();
+    });
     electronAPI.onSetDifficulty?.((level) => handleSetDifficulty(level));
     const onDiffEvent = () => {
       try {
@@ -682,6 +774,11 @@ export const App: React.FC = () => {
       if (e.key === PET_STORAGE_KEY) setPet(loadPet());
       else if (e.key === JOURNAL_STORAGE_KEY) setJournal(loadJournal());
       else if (e.key === EVENTS_STORAGE_KEY) setEvents(loadEvents());
+      else if (e.key === 'ergogotchi_pet_locked') {
+        setIsLocked(e.newValue !== 'false');
+      } else if (e.key === SKIN_STORAGE_KEY && e.newValue) {
+        setEggShellSkin(e.newValue as EggShellSkin);
+      }
     };
     window.addEventListener('storage', onStorage);
 
@@ -718,7 +815,7 @@ export const App: React.FC = () => {
       if (electronAPI?.dockPet) {
         electronAPI.dockPet();
       } else if (electronAPI?.setPetBounds) {
-        electronAPI.setPetBounds({ width: 280, height: 320 });
+        electronAPI.setPetBounds({ width: 320, height: 460 });
       }
       electronAPI?.setIgnoreMouse?.(true);
     }
@@ -731,6 +828,9 @@ export const App: React.FC = () => {
   };
 
   const activeState = forcedState || scoringState.state;
+  const activeHp = forcedState
+    ? (forcedState === 'THRIVING' ? 95 : forcedState === 'NEUTRAL' ? 75 : forcedState === 'SLOUCHING' ? 45 : 15)
+    : scoringState.hp;
 
   // Floating Update Notification Banner (when an update is found)
   const updateBanner = updateInfo?.updateAvailable && !showUpdateModal && (
@@ -812,22 +912,11 @@ export const App: React.FC = () => {
 
     return (
       <div className="w-screen h-screen bg-transparent flex flex-col items-center justify-end overflow-hidden select-none pb-1">
-        {isCalibrating && (
-          <div className="mb-2 px-3 py-2 rounded-xl bg-white border-2 border-black text-center shadow-[3px_3px_0_0_#000]">
-            <p className="text-[11px] font-black text-black">Sit tall… calibrating</p>
-            <div className="w-36 bg-neutral-200 border border-black rounded-full h-2 mt-1.5 overflow-hidden">
-              <div
-                className="bg-yellow-400 h-full transition-all duration-200"
-                style={{ width: `${calibrationProgress}%` }}
-              />
-            </div>
-          </div>
-        )}
         {updateBanner}
         {updateModal}
         <MascotSprite
           state={activeState}
-          hp={scoringState.hp}
+          hp={activeHp}
           isReviving={scoringState.isReviving}
           speechText={speechText}
           speechCue={speechCue}
@@ -838,6 +927,11 @@ export const App: React.FC = () => {
           onDismissSpeech={() => setSpeechText(null)}
           onOpenDashboard={handleOpenDashboard}
           onRecalibrate={handleRecalibrate}
+          isLocked={isLocked}
+          onToggleLock={handleToggleLock}
+          isCalibrating={isCalibrating}
+          calibrationProgress={calibrationProgress}
+          skin={eggShellSkin}
         />
       </div>
     );
@@ -857,7 +951,7 @@ export const App: React.FC = () => {
         {updateBanner}
         {updateModal}
         <Dashboard
-          hp={scoringState.hp}
+          hp={activeHp}
           state={activeState}
           strainIndex={scoringState.strainIndex}
           blinkRate={currentSignals?.blink_rate_1m || 14}
@@ -884,6 +978,10 @@ export const App: React.FC = () => {
           onEventsChange={changeEvents}
           theme={theme}
           onToggleTheme={toggleTheme}
+          isLocked={isLocked}
+          onToggleLock={handleToggleLock}
+          skin={eggShellSkin}
+          onSelectSkin={handleSelectSkin}
           difficulty={difficulty}
           onSetDifficulty={handleSetDifficulty}
           isPresent={isPresent}
@@ -927,7 +1025,7 @@ export const App: React.FC = () => {
         {updateBanner}
         {updateModal}
         {wizardOverlay}
-          <div className="relative w-full max-w-4xl h-96 rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
+          <div className="relative w-full max-w-4xl min-h-[500px] rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
             {/* Mock Code Editor in Background to demonstrate desktop companion feel */}
             <div className="font-mono text-xs text-slate-500 space-y-1 select-none pointer-events-none opacity-60">
               <p><span className="text-purple-400">import</span> &#123; ErgoGotchi &#125; <span className="text-purple-400">from</span> <span className="text-emerald-400">'@sunhacks/ergogotchi'</span>;</p>
@@ -958,7 +1056,7 @@ export const App: React.FC = () => {
             <div className="flex justify-end items-end w-full">
               <MascotSprite
                 state={activeState}
-                hp={scoringState.hp}
+                hp={activeHp}
                 isReviving={scoringState.isReviving}
                 speechText={speechText}
                 speechCue={speechCue}
@@ -969,6 +1067,11 @@ export const App: React.FC = () => {
                 onDismissSpeech={() => setSpeechText(null)}
                 onOpenDashboard={handleOpenDashboard}
                 onRecalibrate={handleRecalibrate}
+                isLocked={isLocked}
+                onToggleLock={handleToggleLock}
+                isCalibrating={isCalibrating}
+                calibrationProgress={calibrationProgress}
+                skin={eggShellSkin}
               />
             </div>
           </div>
