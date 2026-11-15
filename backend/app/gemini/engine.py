@@ -105,7 +105,7 @@ class GeminiPersonaEngine:
             logger.error("Failed to reconfigure GeminiPersonaEngine: %s", e)
             return False
 
-    def verify_key_fast(self, candidate_key: Optional[str] = None) -> tuple[bool, str]:
+    async def verify_key_fast(self, candidate_key: Optional[str] = None) -> tuple[bool, str]:
         """Lightweight 1-token probe for the Wizard 'Test Connection' button."""
         key_to_test = (candidate_key or settings.GEMINI_API_KEY or "").strip().replace("\r", "").replace("\n", "")
         if not key_to_test:
