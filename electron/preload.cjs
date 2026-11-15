@@ -11,4 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onToggleDemoMode: (callback) => ipcRenderer.on('menu-toggle-demo', callback),
   setCameraList: (cameras, activeId) => ipcRenderer.send('camera-list', { cameras, activeId }),
   onSelectCamera: (callback) => ipcRenderer.on('menu-select-camera', (event, deviceId) => callback(deviceId)),
+  onActivity: (callback) => ipcRenderer.on('activity', (event, activity) => callback(activity)),
+  onForceActivity: (callback) => ipcRenderer.on('menu-force-activity', (event, value) => callback(value)),
+  onAddCorn: (callback) => ipcRenderer.on('menu-add-corn', (event, amount) => callback(amount)),
+  onResetGrowth: (callback) => ipcRenderer.on('menu-reset-growth', () => callback()),
 });

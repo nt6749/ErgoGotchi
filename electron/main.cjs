@@ -9,6 +9,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const http = require('http');
 const fs = require('fs');
+const { startActivityWatcher } = require('./activityWatcher.cjs');
 
 let petWindow = null;
 let dashboardWindow = null;
@@ -17,6 +18,19 @@ let backendProcess = null;
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
 let activeCameraId = null;
+
+// What the user is doing (TV / music / work), so the duck can join in.
+// `forcedActivity` is a manual override from the right-click menu, for demos.
+let stopActivityWatcher = null;
+let lastActivity = { scene: 'IDLE', music: false };
+let forcedActivity = 'AUTO';
+const ACTIVITY_CHOICES = [
+  ['AUTO', 'Auto (follow my apps)'],
+  ['WATCHING', 'Watching TV'],
+  ['MUSIC', 'Listening to music'],
+  ['WORKING', 'Working'],
+  ['NONE', 'Nothing'],
+];
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 
@@ -156,6 +170,25 @@ function createPetWindow() {
             }))
           : [{ label: 'No cameras found', enabled: false }],
       },
+      {
+        label: '🎬 Duck Activity',
+        submenu: ACTIVITY_CHOICES.map(([value, label]) => ({
+          label,
+          type: 'radio',
+          checked: forcedActivity === value,
+          click: () => {
+            forcedActivity = value;
+            petWindow.webContents.send('menu-force-activity', value);
+          },
+        })),
+      },
+      {
+        label: '🥚 Growth',
+        submenu: [
+          { label: 'Give 10 corn (demo)', click: () => petWindow.webContents.send('menu-add-corn', 10) },
+          { label: 'Start over as an egg', click: () => petWindow.webContents.send('menu-reset-growth') },
+        ],
+      },
       { type: 'separator' },
       {
         label: 'Force State: Thriving [1]',
@@ -176,6 +209,11 @@ function createPetWindow() {
       },
     ]);
     contextMenu.popup(petWindow);
+  });
+
+  // A freshly loaded (or reloaded) page needs the current activity again
+  petWindow.webContents.on('did-finish-load', () => {
+    if (petWindow) petWindow.webContents.send('activity', lastActivity);
   });
 
   petWindow.on('closed', () => {
@@ -249,6 +287,11 @@ app.whenReady().then(async () => {
 
   createPetWindow();
 
+  stopActivityWatcher = startActivityWatcher((activity) => {
+    lastActivity = activity;
+    if (petWindow) petWindow.webContents.send('activity', activity);
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createPetWindow();
@@ -262,6 +305,7 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   stopBackend();
+  if (stopActivityWatcher) stopActivityWatcher();
 });
 
 app.on('window-all-closed', () => {

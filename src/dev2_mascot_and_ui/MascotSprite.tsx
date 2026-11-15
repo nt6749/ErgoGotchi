@@ -6,7 +6,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PetState, StretchCue } from '../types';
 import { soundEffects } from './soundEffects';
-import { PET_WALKS, PetEmote, renderPixelMascot, USE_PIXEL_MASCOT } from './PixelMascot';
+import { Activity, DEFAULT_LOOK, PET_WALKS, PetEmote, renderPixelMascot, USE_PIXEL_MASCOT } from './PixelMascot';
+import { HATCH_MS } from './lifeStageSprites';
+import { ADULT_LEVEL, canFeed, cornNeeded, NEW_PET, stageOf, type LifeStage, type PetProfile } from './progression';
+
+/** Shown when no pet profile is passed in: a plain grown duck. */
+const GROWN_UP: PetProfile = { ...NEW_PET, level: ADULT_LEVEL };
+/** Level-up sparks fly out in these directions (px). */
+const SPARK_DIRECTIONS = [
+  [0, -46], [34, -34], [48, 0], [34, 30], [0, 40], [-34, 30], [-48, 0], [-34, -34],
+];
+/** Corn flies into the pet from these offsets (px) when it is fed. */
+const FEED_CORN_FROM = [
+  [-46, -40], [0, -56], [46, -40], [-30, -62], [30, -62],
+];
 
 /**
  * The Electron pet window ignores the mouse (clicks fall through to the desktop) except while
@@ -25,6 +38,12 @@ interface MascotSpriteProps {
   speechText: string | null;
   speechCue: StretchCue | null;
   emote?: PetEmote | null;
+  /** The pet's profile: name, level, corn and clothes. Omit for a plain grown duck. */
+  pet?: PetProfile;
+  /** Feed the pet (spends corn). Returns true if it ate, false if there wasn't enough corn. */
+  onFeed?: () => boolean;
+  /** What the user is doing on their computer (TV / music / work). */
+  activity?: Activity;
   onDismissSpeech: () => void;
   onOpenDashboard: () => void;
   onRecalibrate: () => void;
@@ -37,17 +56,100 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
   speechText,
   speechCue,
   emote = null,
+  pet,
+  onFeed,
+  activity = DEFAULT_LOOK.activity,
   onDismissSpeech,
   onOpenDashboard,
   onRecalibrate,
 }) => {
   const [isPetting, setIsPetting] = useState(false);
-  const [hearts, setHearts] = useState<Array<{ id: number; x: number; y: number }>>([]);
+  const [hovered, setHovered] = useState(false);
+  // Feeding feedback: a burst of corn flying in, or a "not enough" shake
+  const [feedBurst, setFeedBurst] = useState<number | null>(null);
+  const [refused, setRefused] = useState(false);
   const [typedText, setTypedText] = useState('');
   const [posX, setPosX] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
 
   const bubbleTimerRef = useRef<any>(null);
+
+  // ---- Growth: level-up, hatching and corn feedback
+  const profile = pet ?? GROWN_UP;
+  const stage = stageOf(profile);
+  // The stage being drawn lags behind the real one while a hatch / evolve animation plays
+  const [shownStage, setShownStage] = useState<LifeStage>(stage);
+  const [hatching, setHatching] = useState(false);
+  const [flashing, setFlashing] = useState(false);
+  const [banner, setBanner] = useState<{ id: number; text: string } | null>(null);
+  const [cornPops, setCornPops] = useState<Array<{ id: number; amount: number }>>([]);
+  const prevGrowthRef = useRef({ level: profile.level, stage, earned: profile.cornEarned });
+  const growthTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const later = (fn: () => void, ms: number) => {
+    growthTimersRef.current.push(setTimeout(fn, ms));
+  };
+  useEffect(() => () => growthTimersRef.current.forEach(clearTimeout), []);
+  // Steps of the hatch / evolve animation in progress, cancelled if the level changes again mid-way
+  const stageTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const stageLater = (fn: () => void, ms: number) => {
+    stageTimersRef.current.push(setTimeout(fn, ms));
+  };
+  const cancelStageAnimation = () => {
+    stageTimersRef.current.forEach(clearTimeout);
+    stageTimersRef.current = [];
+    setHatching(false);
+    setFlashing(false);
+  };
+  useEffect(() => () => stageTimersRef.current.forEach(clearTimeout), []);
+
+  useEffect(() => {
+    const prev = prevGrowthRef.current;
+    const { level, cornEarned } = profile;
+    prevGrowthRef.current = { level, stage, earned: cornEarned };
+
+    // Floating "+1 corn" each time sitting upright pays out
+    const earned = cornEarned - prev.earned;
+    if (earned > 0) {
+      const pop = { id: Date.now() + Math.random(), amount: earned };
+      setCornPops((pops) => [...pops, pop]);
+      later(() => setCornPops((pops) => pops.filter((p) => p.id !== pop.id)), 1400);
+    }
+
+    if (level < prev.level) {
+      // Went back a level or started over: snap straight to the new stage, no fanfare
+      cancelStageAnimation();
+      setShownStage(stage);
+      return;
+    }
+
+    if (level > prev.level) {
+      const id = Date.now();
+      cancelStageAnimation();
+      if (prev.stage === 'EGG' && stage !== 'EGG') {
+        // Egg -> baby: play the hatching frames, then switch to the new stage
+        setBanner({ id, text: 'It hatched!' });
+        setHatching(true);
+        soundEffects.playHatch();
+        stageLater(() => {
+          setHatching(false);
+          setShownStage(stage);
+        }, HATCH_MS);
+      } else {
+        setBanner({ id, text: stage !== prev.stage ? 'All grown up!' : `Level up!  Lv ${level}` });
+        setFlashing(true);
+        soundEffects.playLevelUp();
+        // Swap the sprite in the middle of the flash so the change is hidden by it
+        stageLater(() => setShownStage(stage), 650);
+        stageLater(() => setFlashing(false), 1400);
+      }
+      later(() => setBanner((b) => (b && b.id === id ? null : b)), 2600);
+    }
+  }, [profile.level, profile.cornEarned]);
+
+  const need = cornNeeded(profile);
+  const enoughCorn = canFeed(profile);
+
+  const look = { stage: shownStage, activity, hatching, outfit: profile.equipped };
 
   // The parent passes a new callback on every render (25x/sec with a live camera).
   // Read it through a ref so the typewriter below only restarts when the text changes.
@@ -113,19 +215,22 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     return () => clearInterval(walkInterval);
   }, [state, direction]);
 
-  // Handle clicking / petting
-  const handlePet = (e: React.MouseEvent) => {
+  // Clicking feeds the pet: it eats the corn it needs to level up, or refuses if there isn't enough
+  const handleFeed = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsPetting(true);
-    soundEffects.playPet();
-
-    const newHeart = { id: Date.now(), x: (Math.random() - 0.5) * 30, y: -20 };
-    setHearts((prev) => [...prev, newHeart]);
-
-    setTimeout(() => {
-      setIsPetting(false);
-      setHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
-    }, 1200);
+    if (!onFeed) return;
+    if (onFeed()) {
+      const id = Date.now();
+      setIsPetting(true);
+      setFeedBurst(id);
+      soundEffects.playEat();
+      later(() => setIsPetting(false), 600);
+      later(() => setFeedBurst((b) => (b === id ? null : b)), 700);
+    } else {
+      setRefused(true);
+      soundEffects.playRefuse();
+      later(() => setRefused(false), 450);
+    }
   };
 
   return (
@@ -135,10 +240,10 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     >
       {/* Dynamic Comic Speech Bubble */}
       {speechText && (
-        <div {...captureMouse} className="animate-bounce-in mb-3 w-48 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border-2 border-emerald-400/80 backdrop-blur-md relative z-50">
+        <div {...captureMouse} className="animate-bounce-in mb-3 w-48 bg-white text-black p-3 rounded-2xl border-2 border-black shadow-[3px_3px_0_0_#000] relative z-50">
           <button
             onClick={onDismissSpeech}
-            className="absolute -top-2 -right-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full w-5 h-5 flex items-center justify-center text-xs border border-slate-600 shadow"
+            className="absolute -top-2.5 -right-2.5 bg-yellow-400 hover:bg-yellow-300 text-black font-black rounded-full w-5 h-5 flex items-center justify-center text-xs border-2 border-black"
             title="Dismiss"
           >
             ×
@@ -146,36 +251,32 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
           
           {speechCue && speechCue !== 'NONE' && (
             <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-yellow-400 text-black border border-black">
                 {speechCue.replace('_', ' ')}
               </span>
             </div>
           )}
 
-          <p className="text-xs font-medium leading-relaxed tracking-wide text-slate-100">
+          <p className="text-xs font-semibold leading-relaxed text-black">
             {typedText}
           </p>
 
           {/* Bubble tail arrow */}
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-emerald-400/80" />
+          <div className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-t-[9px] border-t-black" />
         </div>
       )}
 
-      {/* Floating Hearts from Petting */}
-      {hearts.map((h) => (
-        <span
-          key={h.id}
-          className="absolute text-pink-400 font-bold text-lg pointer-events-none animate-float-fade"
-          style={{ transform: `translate(${h.x}px, ${h.y}px)` }}
-        >
-          ♥
-        </span>
-      ))}
-
       {/* Mascot Sprite Container */}
       <div
-        {...captureMouse}
-        onClick={handlePet}
+        onMouseEnter={() => {
+          captureMouse.onMouseEnter();
+          setHovered(true);
+        }}
+        onMouseLeave={() => {
+          captureMouse.onMouseLeave();
+          setHovered(false);
+        }}
+        onClick={handleFeed}
         onDoubleClick={onOpenDashboard}
         onContextMenu={(e) => {
           // In Electron, let the native right-click menu open instead
@@ -183,27 +284,100 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
           e.preventDefault();
           onRecalibrate();
         }}
-        title="Double-click to open Dashboard | Right-click to Calibrate | Click to Pet"
+        title={pet ? undefined : 'Double-click to open Dashboard | Right-click to Calibrate'}
         className={`cursor-pointer transition-transform duration-300 relative ${
           isReviving ? 'animate-backflip' : ''
-        } ${isPetting ? 'scale-110' : ''}`}
+        } ${isPetting ? 'scale-110' : ''} ${flashing ? 'animate-level-flash' : ''} ${
+          refused ? 'animate-knife-shake' : ''
+        }`}
         style={{
           transform: `translateX(${posX}px) scaleX(${direction})`,
         }}
       >
         {/* Render State Specific SVG Graphic */}
-        {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote) : renderMascotGraphic(state, hp)}
+        {USE_PIXEL_MASCOT ? renderPixelMascot(state, hp, emote, look) : renderMascotGraphic(state, hp)}
+
+        {/* Level-up sparks and banner, and floating XP numbers (never block the mouse) */}
+        {banner && (
+          <div key={banner.id} className="absolute inset-0 pointer-events-none z-40">
+            {SPARK_DIRECTIONS.map(([dx, dy], i) => (
+              <span
+                key={i}
+                className="absolute left-1/2 top-1/2 text-amber-300 text-sm animate-level-spark"
+                style={{ ['--dx' as any]: `${dx}px`, ['--dy' as any]: `${dy}px` }}
+              >
+                ✦
+              </span>
+            ))}
+            <div className="absolute -top-7 left-1/2 -translate-x-1/2">
+              <div className="animate-level-banner whitespace-nowrap px-2.5 py-1 rounded-full bg-yellow-400 text-black text-[11px] font-black uppercase tracking-wide border-2 border-black shadow-[2px_2px_0_0_#000]">
+                {banner.text}
+              </div>
+            </div>
+          </div>
+        )}
+        {cornPops.map((pop) => (
+          <span
+            key={pop.id}
+            className="absolute -top-1 right-0 pointer-events-none z-30 text-[11px] font-black text-black animate-xp-float whitespace-nowrap px-1 rounded bg-yellow-400 border border-black"
+          >
+            +{pop.amount} 🌽
+          </span>
+        ))}
+
+        {/* Fed: corn flies into the pet */}
+        {feedBurst !== null && (
+          <div key={feedBurst} className="absolute inset-0 pointer-events-none z-30">
+            {FEED_CORN_FROM.map(([dx, dy], i) => (
+              <span
+                key={i}
+                className="absolute left-1/2 top-1/2 text-sm animate-corn-fly"
+                style={{ ['--dx' as any]: `${dx}px`, ['--dy' as any]: `${dy}px`, animationDelay: `${i * 60}ms` }}
+              >
+                🌽
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Hover: corn in the pantry vs corn needed for the next level */}
+        {pet && hovered && !banner && (
+          <div className="absolute -top-10 left-1/2 -translate-x-1/2 pointer-events-none z-40 whitespace-nowrap text-center px-2 py-1 rounded-lg bg-white border-2 border-black shadow-[2px_2px_0_0_#000]">
+            <div className={`text-[12px] font-black leading-tight ${enoughCorn ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {profile.corn}/{need} 🌽
+            </div>
+            <div className="text-[9px] font-semibold text-neutral-700 leading-tight">
+              {enoughCorn ? `Click to feed ${profile.name}` : `${need - profile.corn} more to level up`}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Micro Health Bar under Mascot */}
-      <div className="w-20 bg-slate-900/80 rounded-full h-1.5 mt-2 border border-slate-700 overflow-hidden shadow">
+      <div className="w-20 bg-white rounded-full h-2 mt-2 border-2 border-black overflow-hidden">
         <div
-          className={`h-full transition-all duration-500 rounded-full ${
-            hp >= 80 ? 'bg-emerald-400' : hp >= 40 ? 'bg-amber-400' : 'bg-rose-500'
+          className={`h-full transition-all duration-500 ${
+            hp >= 80 ? 'bg-emerald-500' : hp >= 40 ? 'bg-yellow-400' : 'bg-rose-500'
           }`}
           style={{ width: `${Math.max(4, hp)}%` }}
         />
       </div>
+
+      {/* Level, corn progress towards the next level, and the pantry */}
+      {pet && (
+        <div className="flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full bg-white border-2 border-black">
+          <span className="text-[9px] font-black text-black leading-none">Lv {profile.level}</span>
+          <div className="w-10 bg-neutral-200 rounded-full h-1.5 border border-black overflow-hidden">
+            <div
+              className={`h-full transition-all duration-500 ${enoughCorn ? 'bg-emerald-500' : 'bg-yellow-400'}`}
+              style={{ width: `${Math.max(3, Math.min(1, profile.corn / need) * 100)}%` }}
+            />
+          </div>
+          <span className={`text-[9px] font-black leading-none ${enoughCorn ? 'text-emerald-600' : 'text-black'}`}>
+            🌽{profile.corn}
+          </span>
+        </div>
+      )}
     </div>
   );
 };
