@@ -31,6 +31,9 @@ export interface EggShellSkinConfig {
   // Logo text
   logoColor: string;
   logoShadow: string;
+  // Captions printed on the shell (Pet / Feed / Lock)
+  labelColor: string;
+  labelShadow: string;
   // Preview colors for MyDuck tab
   previewBg: string;
   previewBorder: string;
@@ -58,6 +61,8 @@ export const EGG_SHELL_SKINS: Record<EggShellSkin, EggShellSkinConfig> = {
     buttonTextColor: '#0c4a6e',
     logoColor: '#ffffff',
     logoShadow: '0 1px 4px rgba(0,0,0,0.9), 0 0 10px rgba(255,255,255,0.8)',
+    labelColor: '#ffffff',
+    labelShadow: '0 1px 2px rgba(0,0,0,0.9)',
     previewBg: 'bg-gradient-to-br from-indigo-950 via-blue-950 to-slate-950',
     previewBorder: 'border-yellow-400',
   },
@@ -81,6 +86,8 @@ export const EGG_SHELL_SKINS: Record<EggShellSkin, EggShellSkinConfig> = {
     buttonTextColor: '#581c87',
     logoColor: '#818cf8',
     logoShadow: '0 1px 2px rgba(0,0,0,0.4)',
+    labelColor: 'rgba(0,0,0,0.9)',
+    labelShadow: 'none',
     previewBg: 'bg-gradient-to-br from-pink-200 via-rose-300 to-pink-400',
     previewBorder: 'border-purple-400',
   },
@@ -104,6 +111,8 @@ export const EGG_SHELL_SKINS: Record<EggShellSkin, EggShellSkinConfig> = {
     buttonTextColor: '#7c2d12',
     logoColor: '#065f46',
     logoShadow: '0 1px 2px rgba(255,255,255,0.6)',
+    labelColor: 'rgba(0,0,0,0.9)',
+    labelShadow: 'none',
     previewBg: 'bg-gradient-to-br from-emerald-200 via-lime-300 to-green-400',
     previewBorder: 'border-lime-500',
   },

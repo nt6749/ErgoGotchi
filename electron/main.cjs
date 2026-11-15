@@ -10,6 +10,12 @@ const { spawn } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const { startActivityWatcher } = require('./activityWatcher.cjs');
+const {
+  checkForUpdates,
+  downloadAndInstallUpdate,
+  getLoginItemSettings,
+  setLoginItemSettings,
+} = require('./updater.cjs');
 
 let petWindow = null;
 let dashboardWindow = null;
@@ -17,6 +23,7 @@ let backendProcess = null;
 let isWizardActive = false;
 let isPetLocked = true;
 let currentDifficulty = 'normal';
+let alwaysShowCorn = true;
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
@@ -100,6 +107,26 @@ function stopBackend() {
   }
 }
 
+function getSavedPetPosition() {
+  try {
+    const p = path.join(app.getPath('userData'), 'pet-position.json');
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (typeof data.x === 'number' && typeof data.y === 'number') {
+        return data;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+function savePetPosition(pos) {
+  try {
+    const p = path.join(app.getPath('userData'), 'pet-position.json');
+    fs.writeFileSync(p, JSON.stringify(pos), 'utf8');
+  } catch (e) {}
+}
+
 function createPetWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
@@ -107,8 +134,20 @@ function createPetWindow() {
   // Room for the egg machine and the speech bubble above it
   const initialWidth = 320;
   const initialHeight = 460;
-  const initialX = screenWidth - initialWidth - 60;
-  const initialY = screenHeight - initialHeight - 10;
+  const defaultX = screenWidth - initialWidth - 60;
+  const defaultY = screenHeight - initialHeight - 10;
+
+  // Use the saved spot only if it is still on a connected screen (a monitor may have been unplugged)
+  const saved = getSavedPetPosition();
+  const savedOnScreen =
+    saved &&
+    screen.getAllDisplays().some(({ workArea: a }) => {
+      const cx = saved.x + initialWidth / 2;
+      const cy = saved.y + initialHeight / 2;
+      return cx >= a.x && cx <= a.x + a.width && cy >= a.y && cy <= a.y + a.height;
+    });
+  const initialX = savedOnScreen ? saved.x : defaultX;
+  const initialY = savedOnScreen ? saved.y : defaultY;
 
   petWindow = new BrowserWindow({
     icon: APP_ICON_PATH,
@@ -177,6 +216,46 @@ function createPetWindow() {
       {
         label: '🌾 Feed Duck (🌽)',
         click: () => petWindow.webContents.send('menu-feed-duck'),
+      },
+      {
+        label: '📌 Dock Pet to Corner',
+        click: () => {
+          if (!petWindow) return;
+          const primaryDisplay = screen.getPrimaryDisplay();
+          const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+          const initialWidth = 320;
+          const initialHeight = 460;
+          const initialX = screenWidth - initialWidth - 60;
+          const initialY = screenHeight - initialHeight - 10;
+          petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
+          savePetPosition({ x: initialX, y: initialY });
+          petWindow.webContents.send('menu-pet-docked');
+        },
+      },
+      {
+        label: '🌽 Always Show Corn Level',
+        type: 'checkbox',
+        checked: alwaysShowCorn,
+        click: (menuItem) => {
+          alwaysShowCorn = menuItem.checked;
+          if (petWindow && !petWindow.isDestroyed()) {
+            petWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+          }
+          if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+            dashboardWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+          }
+        },
+      },
+      {
+        label: '🔄 Check for Updates...',
+        click: () => {
+          createDashboardWindow();
+          setTimeout(() => {
+            if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+              dashboardWindow.webContents.send('menu-check-updates');
+            }
+          }, 500);
+        },
       },
       { type: 'separator' },
       {
@@ -296,16 +375,35 @@ function createDashboardWindow() {
 }
 
 // IPC Handlers
-ipcMain.on('pet-move', (event, { x, y }) => {
+ipcMain.on('pet-move', (event, { x, y, save = false }) => {
   if (petWindow) {
-    petWindow.setPosition(x, y);
+    const rx = Math.round(x);
+    const ry = Math.round(y);
+    petWindow.setPosition(rx, ry);
+    if (save) {
+      savePetPosition({ x: rx, y: ry });
+    }
   }
 });
 
-ipcMain.on('pet-move-by', (event, { dx, dy }) => {
-  if (!petWindow) return;
-  const [x, y] = petWindow.getPosition();
-  petWindow.setPosition(Math.round(x + dx), Math.round(y + dy));
+ipcMain.on('pet-move-by', (event, { dx, dy, save = false }) => {
+  if (petWindow) {
+    const [currX, currY] = petWindow.getPosition();
+    const nx = currX + Math.round(dx);
+    const ny = currY + Math.round(dy);
+    petWindow.setPosition(nx, ny);
+    if (save) {
+      savePetPosition({ x: nx, y: ny });
+    }
+  }
+});
+
+ipcMain.handle('get-pet-position', () => {
+  if (petWindow) {
+    const [x, y] = petWindow.getPosition();
+    return { x, y };
+  }
+  return { x: 0, y: 0 };
 });
 
 ipcMain.on('pet-set-bounds', (event, bounds) => {
@@ -341,6 +439,18 @@ ipcMain.on('pet-dock-corner', () => {
   const initialX = screenWidth - initialWidth - 60;
   const initialY = screenHeight - initialHeight - 10;
   petWindow.setBounds({ x: initialX, y: initialY, width: initialWidth, height: initialHeight });
+  savePetPosition({ x: initialX, y: initialY });
+  petWindow.webContents.send('menu-pet-docked');
+});
+
+ipcMain.on('set-always-show-corn', (event, show) => {
+  alwaysShowCorn = !!show;
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+  }
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('always-show-corn-changed', alwaysShowCorn);
+  }
 });
 
 ipcMain.on('pet-set-locked', (event, locked) => {
@@ -367,6 +477,34 @@ ipcMain.on('wizard-active', (event, active) => {
   isWizardActive = !!active;
 });
 
+// Auto-Updater & System Startup IPC Handlers
+ipcMain.handle('check-for-updates', async () => {
+  return await checkForUpdates();
+});
+
+ipcMain.handle('download-and-install-update', async (event, asset) => {
+  return await downloadAndInstallUpdate(asset, (progress) => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      petWindow.webContents.send('update-download-progress', progress);
+    }
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('update-download-progress', progress);
+    }
+  });
+});
+
+ipcMain.handle('get-login-item-settings', () => {
+  return getLoginItemSettings();
+});
+
+ipcMain.handle('set-login-item-settings', (event, openAtLogin) => {
+  return setLoginItemSettings(openAtLogin);
+});
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
 app.whenReady().then(async () => {
   const isAlive = await checkBackendAlive();
   if (!isAlive) {
@@ -374,6 +512,24 @@ app.whenReady().then(async () => {
   }
 
   createPetWindow();
+
+  // Background check for GitHub updates on app startup (after 3 seconds)
+  setTimeout(async () => {
+    try {
+      const info = await checkForUpdates();
+      if (info && info.updateAvailable) {
+        console.log(`[ErgoGotchi AutoUpdater] Update available on startup: ${info.latestVersion}`);
+        if (petWindow && !petWindow.isDestroyed()) {
+          petWindow.webContents.send('update-available', info);
+        }
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('update-available', info);
+        }
+      }
+    } catch (e) {
+      console.warn('[ErgoGotchi AutoUpdater] Startup update check failed:', e);
+    }
+  }, 3000);
 
   stopActivityWatcher = startActivityWatcher((activity) => {
     lastActivity = activity;

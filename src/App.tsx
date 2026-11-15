@@ -10,7 +10,9 @@ import {
   DifficultyLevel,
   ScoringParams, 
   ScoringState, 
-  StretchCue 
+  StretchCue,
+  UpdateInfo,
+  UpdateProgress,
 } from './types';
 import { 
   createInitialState, 
@@ -68,8 +70,6 @@ interface ElectronAPI {
   openDashboard: () => void;
   setPetBounds?: (bounds: { width: number; height: number; x?: number; y?: number; center?: boolean }) => void;
   setIgnoreMouse?: (ignore: boolean) => void;
-  movePet?: (x: number, y: number) => void;
-  movePetBy?: (dx: number, dy: number) => void;
   onRecalibrate: (cb: () => void) => void;
   onForceState: (cb: (state: PetState) => void) => void;
   onToggleDemoMode: (cb: () => void) => void;
@@ -87,6 +87,20 @@ interface ElectronAPI {
   onToggleLock?: (cb: (locked: boolean) => void) => void;
   setLocked?: (locked: boolean) => void;
   onFeedDuck?: (cb: () => void) => void;
+  movePet?: (x: number, y: number, save?: boolean) => void;
+  movePetBy?: (dx: number, dy: number, save?: boolean) => void;
+  getPetPosition?: () => Promise<{ x: number; y: number }>;
+  onPetDocked?: (cb: () => void) => void;
+  setAlwaysShowCorn?: (show: boolean) => void;
+  onAlwaysShowCornChanged?: (cb: (show: boolean) => void) => void;
+  checkForUpdates?: () => Promise<UpdateInfo>;
+  downloadAndInstallUpdate?: (asset: { name: string; downloadUrl: string; size?: number }) => Promise<{ success: boolean; path?: string; error?: string }>;
+  onUpdateProgress?: (cb: (progress: UpdateProgress) => void) => void;
+  onUpdateAvailable?: (cb: (info: UpdateInfo) => void) => void;
+  getLoginItemSettings?: () => Promise<boolean>;
+  setLoginItemSettings?: (openAtLogin: boolean) => Promise<boolean>;
+  getAppVersion?: () => Promise<string>;
+  onMenuCheckUpdates?: (cb: () => void) => void;
 }
 
 /**
@@ -238,6 +252,14 @@ export const App: React.FC = () => {
   const forcedActivityRef = useRef(forcedActivity);
   forcedActivityRef.current = forcedActivity;
 
+  // Auto-Update & Launch on Startup State
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [isUpdating, setIsUpdating] = useState<boolean>(false);
+  const [showUpdateModal, setShowUpdateModal] = useState<boolean>(false);
+  const [appVersion, setAppVersion] = useState<string>('1.0.1');
+  const [launchOnStartup, setLaunchOnStartup] = useState<boolean>(false);
+
   // Speech bubble state
   const [speechText, setSpeechText] = useState<string | null>(null);
   const [speechCue, setSpeechCue] = useState<StretchCue | null>(null);
@@ -368,6 +390,109 @@ export const App: React.FC = () => {
       navigator.mediaDevices?.removeEventListener('devicechange', onDeviceChange);
       window.removeEventListener('storage', onStorage);
     };
+  }, []);
+
+  // Update actions
+  const handleManualCheckUpdates = async (): Promise<UpdateInfo> => {
+    if (electronAPI?.checkForUpdates) {
+      try {
+        const info = await electronAPI.checkForUpdates();
+        setUpdateInfo(info);
+        return info;
+      } catch (err: any) {
+        const errInfo: UpdateInfo = {
+          updateAvailable: false,
+          currentVersion: appVersion,
+          latestVersion: appVersion,
+          error: err?.message || 'Could not connect to update server',
+        };
+        setUpdateInfo(errInfo);
+        return errInfo;
+      }
+    }
+    const fallback: UpdateInfo = {
+      updateAvailable: false,
+      currentVersion: appVersion,
+      latestVersion: appVersion,
+    };
+    setUpdateInfo(fallback);
+    return fallback;
+  };
+
+  const handleTriggerUpdate = async (asset?: { name: string; downloadUrl: string; size?: number } | null) => {
+    const target = asset || updateInfo?.asset;
+    if (!target) return;
+    setIsUpdating(true);
+    setShowUpdateModal(true);
+    setUpdateProgress({ percent: 0, receivedBytes: 0, totalBytes: target.size || 0 });
+
+    try {
+      if (electronAPI?.downloadAndInstallUpdate) {
+        await electronAPI.downloadAndInstallUpdate(target);
+      }
+    } catch (err: any) {
+      console.warn('[App] Update install failed:', err);
+      setIsUpdating(false);
+      setShowUpdateModal(false);
+    }
+  };
+
+  const handleToggleLaunchOnStartup = async (enabled: boolean) => {
+    setLaunchOnStartup(enabled);
+    if (electronAPI?.setLoginItemSettings) {
+      try {
+        const res = await electronAPI.setLoginItemSettings(enabled);
+        setLaunchOnStartup(res);
+      } catch (e) {
+        console.warn('[App] Failed to update login item settings:', e);
+      }
+    }
+  };
+
+  // Auto-Updater & System Startup Listeners
+  useEffect(() => {
+    if (electronAPI?.getAppVersion) {
+      electronAPI.getAppVersion().then((v) => {
+        if (v) setAppVersion(v);
+      });
+    }
+    if (electronAPI?.getLoginItemSettings) {
+      electronAPI.getLoginItemSettings().then((enabled) => setLaunchOnStartup(!!enabled));
+    }
+
+    electronAPI?.onUpdateProgress?.((progress) => {
+      setUpdateProgress(progress);
+    });
+
+    electronAPI?.onUpdateAvailable?.((info) => {
+      setUpdateInfo(info);
+      const autoInstall = localStorage.getItem('ergogotchi.autoInstallUpdates') === 'true';
+      if (autoInstall && info.asset) {
+        handleTriggerUpdate(info.asset);
+      } else {
+        setSpeechText(`⚡ Update ${info.latestVersion} available!`);
+      }
+    });
+
+    electronAPI?.onMenuCheckUpdates?.(() => {
+      handleManualCheckUpdates();
+    });
+
+    // Auto-check on startup if enabled (defaults to true)
+    const autoCheck = localStorage.getItem('ergogotchi.autoCheckUpdates') !== 'false';
+    if (autoCheck && electronAPI?.checkForUpdates) {
+      electronAPI.checkForUpdates().then((info) => {
+        if (info && info.updateAvailable) {
+          setUpdateInfo(info);
+          const autoInstall = localStorage.getItem('ergogotchi.autoInstallUpdates') === 'true';
+          if (autoInstall && info.asset) {
+            handleTriggerUpdate(info.asset);
+          } else {
+            setSpeechText(`⚡ Update ${info.latestVersion} available!`);
+          }
+        }
+      });
+    }
   }, []);
 
   // Update calibration progress
@@ -707,6 +832,72 @@ export const App: React.FC = () => {
     ? (forcedState === 'THRIVING' ? 95 : forcedState === 'NEUTRAL' ? 75 : forcedState === 'SLOUCHING' ? 45 : 15)
     : scoringState.hp;
 
+  // Floating Update Notification Banner (when an update is found)
+  const updateBanner = updateInfo?.updateAvailable && !showUpdateModal && (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border-2 border-cyan-400 rounded-2xl px-4 py-2.5 shadow-2xl backdrop-blur-md flex items-center gap-3 animate-bounce">
+      <span className="text-xl">⚡</span>
+      <div className="text-left text-xs leading-tight">
+        <span className="font-bold text-white">Update {updateInfo.latestVersion} Available!</span>
+        <p className="text-[10px] text-slate-300">Click to download update & restart ErgoGotchi.</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => handleTriggerUpdate()}
+        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-400 hover:bg-cyan-300 text-slate-950 transition active:scale-95 shadow"
+      >
+        Update & Restart
+      </button>
+      <button
+        type="button"
+        onClick={() => setUpdateInfo((prev) => (prev ? { ...prev, updateAvailable: false } : null))}
+        className="text-slate-400 hover:text-slate-200 text-xs px-1"
+        title="Dismiss for now"
+      >
+        ✕
+      </button>
+    </div>
+  );
+
+  // Fullscreen / Floating Update Progress Modal (when downloading/installing)
+  const updateModal = showUpdateModal && (
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-center">
+        <div className="w-16 h-16 mx-auto rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-3xl animate-bounce">
+          📦
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-white">Updating ErgoGotchi</h3>
+          <p className="text-xs text-slate-300 mt-1">
+            Downloading version {updateInfo?.latestVersion || 'latest'} from GitHub...
+          </p>
+        </div>
+
+        <div className="space-y-1.5 pt-2">
+          <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
+            <div
+              className="bg-gradient-to-r from-cyan-400 to-emerald-400 h-full transition-all duration-150"
+              style={{ width: `${updateProgress?.percent || 0}%` }}
+            />
+          </div>
+          <div className="flex justify-between items-center text-[11px] font-mono text-slate-400 px-1">
+            <span>
+              {updateProgress && updateProgress.totalBytes > 0
+                ? `${(updateProgress.receivedBytes / (1024 * 1024)).toFixed(1)} MB / ${(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`
+                : 'Connecting to GitHub...'}
+            </span>
+            <span className="text-cyan-300 font-bold">{updateProgress?.percent || 0}%</span>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-slate-400 italic">
+          {updateProgress && updateProgress.percent >= 100
+            ? '✓ Download complete! Launching installer and restarting...'
+            : 'Please wait while the update downloads. ErgoGotchi will restart automatically.'}
+        </p>
+      </div>
+    </div>
+  );
+
   if (isPetWindow) {
     if (showWizard) {
       return (
@@ -721,6 +912,8 @@ export const App: React.FC = () => {
 
     return (
       <div className="w-screen h-screen bg-transparent flex flex-col items-center justify-end overflow-hidden select-none pb-1">
+        {updateBanner}
+        {updateModal}
         <MascotSprite
           state={activeState}
           hp={activeHp}
@@ -755,6 +948,8 @@ export const App: React.FC = () => {
     return (
       <div data-theme={theme} className={`h-screen font-sans select-none overflow-hidden ${PAGE}`}>
         {wizardOverlay}
+        {updateBanner}
+        {updateModal}
         <Dashboard
           hp={activeHp}
           state={activeState}
@@ -789,6 +984,17 @@ export const App: React.FC = () => {
           onSelectSkin={handleSelectSkin}
           difficulty={difficulty}
           onSetDifficulty={handleSetDifficulty}
+          isPresent={isPresent}
+          isCalibrating={isCalibrating}
+          calibrationProgress={calibrationProgress}
+          appVersion={appVersion}
+          updateInfo={updateInfo}
+          updateProgress={updateProgress}
+          isUpdating={isUpdating}
+          onCheckForUpdates={handleManualCheckUpdates}
+          onTriggerUpdate={handleTriggerUpdate}
+          launchOnStartup={launchOnStartup}
+          onToggleLaunchOnStartup={handleToggleLaunchOnStartup}
         />
       </div>
     );
@@ -816,6 +1022,8 @@ export const App: React.FC = () => {
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center relative z-10 w-full p-4">
+        {updateBanner}
+        {updateModal}
         {wizardOverlay}
           <div className="relative w-full max-w-4xl min-h-[500px] rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
             {/* Mock Code Editor in Background to demonstrate desktop companion feel */}

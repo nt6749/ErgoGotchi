@@ -27,6 +27,9 @@ const FEED_CORN_FROM = [
  * the pointer is over the pet or its speech bubble.
  */
 const electronAPI: any = (window as any).electronAPI;
+/** Where the browser preview remembers how far the pet was dragged. */
+const WEB_OFFSET_KEY = 'ergogotchi_web_pet_offset';
+const SHOW_CORN_KEY = 'ergogotchi.alwaysShowCorn';
 const captureMouse = {
   onMouseEnter: () => electronAPI?.setIgnoreMouse?.(false),
   onMouseLeave: () => electronAPI?.setIgnoreMouse?.(true),
@@ -78,6 +81,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
   skin = DEFAULT_SKIN,
 }) => {
   const skinConfig = EGG_SHELL_SKINS[skin] || EGG_SHELL_SKINS[DEFAULT_SKIN];
+  const labelStyle = { color: skinConfig.labelColor, textShadow: skinConfig.labelShadow };
   const [isPetting, setIsPetting] = useState(false);
   const [hovered, setHovered] = useState(false);
   // Hearts burst when petted
@@ -91,11 +95,62 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
   // Dragging support (when !isLocked)
   const [isDragging, setIsDragging] = useState(false);
-  const [browserOffset, setBrowserOffset] = useState({ x: 0, y: 0 });
+  const [browserOffset, setBrowserOffset] = useState<{ x: number; y: number }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WEB_OFFSET_KEY) || 'null');
+      if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') return saved;
+    } catch {}
+    return { x: 0, y: 0 };
+  });
+  const browserOffsetRef = useRef(browserOffset);
+  browserOffsetRef.current = browserOffset;
+  // "Always show corn level" setting (dashboard / right-click menu); when off, corn shows on hover
+  const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SHOW_CORN_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; winX: number; winY: number; elX: number; elY: number } | null>(null);
 
   const bubbleTimerRef = useRef<any>(null);
+
+  // "Dock to corner" puts the pet back where it started
+  useEffect(() => {
+    const handleReset = () => {
+      setBrowserOffset({ x: 0, y: 0 });
+      try {
+        localStorage.removeItem(WEB_OFFSET_KEY);
+      } catch {}
+    };
+    electronAPI?.onPetDocked?.(handleReset);
+    window.addEventListener('pet-docked', handleReset);
+    return () => window.removeEventListener('pet-docked', handleReset);
+  }, []);
+
+  // Follow the corn setting when it is changed in the dashboard or the right-click menu
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === SHOW_CORN_KEY) setAlwaysShowCorn(e.newValue !== 'false');
+    };
+    const handleCustom = (e: any) => {
+      if (typeof e.detail === 'boolean') setAlwaysShowCorn(e.detail);
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('always-show-corn-changed', handleCustom);
+    electronAPI?.onAlwaysShowCornChanged?.((val: boolean) => {
+      setAlwaysShowCorn(val);
+      try {
+        localStorage.setItem(SHOW_CORN_KEY, String(val));
+      } catch {}
+    });
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('always-show-corn-changed', handleCustom);
+    };
+  }, []);
 
   // ---- Growth: level-up, hatching and corn feedback
   const profile = pet ?? GROWN_UP;
@@ -299,8 +354,8 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
       if (dx === 0 && dy === 0) return;
 
-      if (electronAPI?.isElectron && (electronAPI as any).movePetBy) {
-        (electronAPI as any).movePetBy(dx, dy);
+      if (electronAPI?.isElectron && electronAPI.movePetBy) {
+        electronAPI.movePetBy(dx, dy, false);
       } else {
         setBrowserOffset((prev) => ({
           x: prev.x + dx,
@@ -312,6 +367,14 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
     const onPointerUp = () => {
       setIsDragging(false);
       isDraggingRef.current = false;
+      // Remember where the pet was dropped, so it is there again next launch
+      if (electronAPI?.isElectron && electronAPI.movePetBy) {
+        electronAPI.movePetBy(0, 0, true);
+      } else {
+        try {
+          localStorage.setItem(WEB_OFFSET_KEY, JSON.stringify(browserOffsetRef.current));
+        } catch {}
+      }
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
     };
@@ -628,9 +691,11 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
 
           <div className="flex items-center gap-1 font-mono">
             <span>Lv.{profile.level}</span>
-            <span className={enoughCorn ? 'text-emerald-400' : 'text-amber-300'}>
-              🌽{profile.corn}/{need}
-            </span>
+            {(alwaysShowCorn || hovered) && (
+              <span className={enoughCorn ? 'text-emerald-400' : 'text-amber-300'}>
+                🌽{profile.corn}/{need}
+              </span>
+            )}
           </div>
         </div>
 
@@ -654,7 +719,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
             >
               A
             </button>
-            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5 text-black/90">Pet</span>
+            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5" style={labelStyle}>Pet</span>
           </div>
 
           {/* Button B: Feed */}
@@ -672,7 +737,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
             >
               B
             </button>
-            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5 text-black/90">Feed</span>
+            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5" style={labelStyle}>Feed</span>
           </div>
 
           {/* Button C: Lock / Move */}
@@ -695,7 +760,7 @@ export const MascotSprite: React.FC<MascotSpriteProps> = ({
             >
               {isLocked ? '🔒' : '🔓'}
             </button>
-            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5 text-black/90">
+            <span className="text-[8px] font-black uppercase tracking-tight mt-0.5" style={labelStyle}>
               {isLocked ? 'Lock' : 'Move'}
             </span>
           </div>

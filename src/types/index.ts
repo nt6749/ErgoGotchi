@@ -127,3 +127,26 @@ export interface InterventionMessage {
   severity: Severity;
   source: InterventionSource;
 }
+
+/** Auto-Updater Information & Release Metadata */
+export interface UpdateInfo {
+  updateAvailable: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  releaseName?: string;
+  releaseNotes?: string;
+  publishedAt?: string;
+  asset?: {
+    name: string;
+    downloadUrl: string;
+    size: number;
+  } | null;
+  error?: string;
+}
+
+/** Auto-Updater Real-Time Download Progress */
+export interface UpdateProgress {
+  percent: number;
+  receivedBytes: number;
+  totalBytes: number;
+}

@@ -28,6 +28,14 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Sync version from git tag (if version tag)
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" =~ refs/tags/v([0-9]+\.[0-9]+\.[0-9]+.*) ]]; then
+            echo "Setting package version to: ${BASH_REMATCH[1]}"
+            npm version "${BASH_REMATCH[1]}" --no-git-tag-version --allow-same-version
+          fi
+
       - name: Build Web Assets
         run: npm run build
 
@@ -42,7 +50,6 @@ jobs:
           name: ErgoGotchi-Windows-Installers
           path: |
             release/*.exe
-            release/*.blockmap
           if-no-files-found: ignore
 
   build-macos:
@@ -61,6 +68,14 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Sync version from git tag (if version tag)
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" =~ refs/tags/v([0-9]+\.[0-9]+\.[0-9]+.*) ]]; then
+            echo "Setting package version to: ${BASH_REMATCH[1]}"
+            npm version "${BASH_REMATCH[1]}" --no-git-tag-version --allow-same-version
+          fi
+
       - name: Build Web Assets
         run: npm run build
 
@@ -75,7 +90,6 @@ jobs:
           name: ErgoGotchi-macOS-Installers
           path: |
             release/*.dmg
-            release/*.blockmap
           if-no-files-found: ignore
 
   create-release:
@@ -99,12 +113,11 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.0' }}
-          name: ${{ github.ref_name == 'windows-setup' && 'ErgoGotchi v1.0.0 — Official Desktop Companion (Windows & macOS)' || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ErgoGotchi v1.0.0 — Official Release') }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.1' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('ErgoGotchi {0} — Official Desktop Companion (Windows & macOS)', github.ref_name) || 'ErgoGotchi v1.0.1 — Official Desktop Companion (Windows & macOS)' }}
           files: |
             dist-release/*.exe
             dist-release/*.dmg
-            dist-release/*.blockmap
           generate_release_notes: true
           draft: false
           prerelease: false

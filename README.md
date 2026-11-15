@@ -6,20 +6,22 @@
 [![Google Gemini](https://img.shields.io/badge/Google%20Gemini-Powered-blue)](https://ai.google.dev/)
 [![Tiger Data](https://img.shields.io/badge/Tiger%20Data-TimescaleDB%20Hypertables-orange)](https://www.tigerdata.com/)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Edge%20Biometrics-cyan)](https://developers.google.com/mediapipe)
-[![Release](https://img.shields.io/github/v/release/nt6749/sunhacks-project2?color=emerald&label=Release)](https://github.com/nt6749/sunhacks-project2/releases)
-[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-blue?logo=windows)](https://github.com/nt6749/sunhacks-project2/releases/download/windows-setup/ErgoGotchi.Setup.1.0.0.exe)
-[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/sunhacks-project2/releases)
+[![Release](https://img.shields.io/github/v/release/nt6749/sunhacks-project2?color=emerald&label=Latest%20Release)](https://github.com/nt6749/sunhacks-project2/releases)
+[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-blue?logo=windows)](https://github.com/nt6749/sunhacks-project2/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-Disk%20Image%20.dmg-black?logo=apple)](https://github.com/nt6749/sunhacks-project2/releases/latest)
 
 ---
 
 ### ⚡ Quick Downloads & Play (Hackathon Judges & Users)
 
-| Platform | Recommended Installer | Alternative | Status |
-| :--- | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases/download/windows-setup/ErgoGotchi.Setup.1.0.0.exe) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.0 Ready` |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Application Bundle](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.0 Ready` |
+> 🚀 **[📥 Download Latest Official Release from GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** — Ready-to-run compiled binaries for Windows and macOS.
 
-> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine).
+| Platform | Recommended Installer | Alternative / Portable | Status |
+| :--- | :--- | :--- | :--- |
+| **🪟 Windows (10/11)** | [📥 **Download Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 Portable Binary (`.exe`)](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.2 Ready` |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | [📦 All Release Assets](https://github.com/nt6749/sunhacks-project2/releases) | `v1.0.2 Ready` |
+
+> 🏷️ **[View Full Release Notes & Assets on GitHub Releases](https://github.com/nt6749/sunhacks-project2/releases)** · 100% on-device AI biometrics (zero video frames leave your machine). Compiled releases include Windows Setup (`ErgoGotchi-Setup-1.0.2.exe`), Portable (`ErgoGotchi-Portable-1.0.2.exe`), and macOS Disk Image (`ErgoGotchi-1.0.2.dmg`).
 
 ---
 
@@ -75,6 +77,16 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
 
 ---
 
+## ✨ Latest Release Highlights & Native Capabilities (v1.0.2)
+
+- 🌽 **Always-On Corn Progress Overlay**: Keep your duck's corn count and level-up requirements pinned above your pet at all times! Enabled by default, with a toggle in Dashboard Settings and the right-click menu to switch back to show-on-hover mode if you prefer a minimal look.
+- 📍 **Free-Floating Draggable Pet**: Don't want your pet in the bottom-right corner? Click and drag your duck anywhere across your screens and workspace! It automatically saves its position across sessions, with a quick **"📌 Dock Pet to Corner"** option in the right-click menu and Companion Dashboard settings.
+- 🔄 **In-App GitHub Auto-Updater**: When ErgoGotchi launches, it quietly checks GitHub Releases for new updates. If an update is detected, a sleek update banner appears with a direct **Restart & Update** button, downloading and launching the update seamlessly in one click. Configurable in Companion Dashboard settings (toggle auto-updates or click "Check for Updates" manually).
+- 🚀 **Launch at System Startup**: Prefer ErgoGotchi to greet you whenever your PC turns on? Toggle **"Launch ErgoGotchi on system startup"** directly in Dashboard Settings (`openAtLogin` integration).
+- 📹 **Live Vision Diagnostics & Camera Viewfinder**: High-speed live webcam preview built into the Companion Dashboard. Switch cameras, toggle mirror preview, and run the 5-second upright posture calibration with visual real-time facial landmark and shoulder tracking overlays.
+
+---
+
 ## 🎯 Target Sponsor Tracks & Prize Alignment
 
 | Sponsor Track | Prize / Category | Concrete ErgoGotchi Implementation |
@@ -93,24 +105,25 @@ When you maintain flow with upright spinal alignment, ErgoGotchi energetically b
 
 To ensure scientific accuracy over naive pixel thresholds:
 
-### 1. Relative Forward Head Pitch ($forward\_head$)
+### 1. Relative Forward Head Pitch (`forward_head`)
 Computed using the ratio of facial width $F$ (ear-to-ear) to shoulder span $W$, relative to the calibrated baseline $(F_0 / W_0)$:
-$$\text{forward\_head} = \frac{F / W}{F_0 / W_0} - 1$$
-*Starts counting strain at $0.06$; reaches maximum strain at $0.18$.*
+$$\text{Forward Head} = \frac{F / W}{F_0 / W_0} - 1$$
+*Starts counting strain at 0.06; reaches maximum strain at 0.18.*
 
-### 2. Head Drop / Thoracic Slouch ($head\_drop$)
+### 2. Head Drop / Thoracic Slouch (`head_drop`)
 Vertical distance $D$ from the tragus ear midpoint down to the clavicle/shoulder midpoint:
-$$\text{head\_drop} = 1 - \frac{D / W}{D_0 / W_0}$$
-*Catches shoulders hunching up toward ears ($0.08$ to $0.22$).*
+$$\text{Head Drop} = 1 - \frac{D / W}{D_0 / W_0}$$
+*Catches shoulders hunching up toward ears (0.08 to 0.22).*
 
 ### 3. Eye Aspect Ratio & Blendshape Blink Tracking
 Uses MediaPipe FaceLandmarker blendshapes `eyeBlinkLeft` and `eyeBlinkRight`:
-$$\text{BlinkScore} = \frac{\text{eyeBlinkLeft} + \text{eyeBlinkRight}}{2}$$
+$$\text{Blink Score} = \frac{\text{eyeBlinkLeft} + \text{eyeBlinkRight}}{2}$$
 A blink is registered when the score spikes above the user's calibrated threshold for 50–400 ms. Trailing 60-second counts below 8 blinks/min trigger optical fatigue warnings.
 
 ### 4. Strain Index Fusion & Maximum Rule
 To prevent a severe posture defect from being washed out by an arithmetic average, ErgoGotchi takes the maximum strain score across all active signals:
-$$\text{strain} = \max(\text{forward\_head}_s,\ \text{head\_drop}_s,\ \text{head\_pitch}_s,\ \text{lean\_in}_s,\ \text{tilt}_s,\ 0.6 \times \text{blink}_s)$$
+$$\text{Strain} = \max(S_{\text{forward}},\ S_{\text{drop}},\ S_{\text{pitch}},\ S_{\text{lean}},\ S_{\text{tilt}},\ 0.6 \times S_{\text{blink}})$$
+*where $S$ represents the normalized $0.0\text{--}1.0$ strain contribution of each biometric signal (`forward_head`, `head_drop`, `head_pitch`, `lean_in`, `tilt`, `blink`).*
 
 ---
 
@@ -123,8 +136,8 @@ Choose the method that works best for you:
 
 | Platform | Installer File | Installation Steps |
 | :--- | :--- | :--- |
-| **🪟 Windows (10/11)** | [📥 **`ErgoGotchi.Setup.1.0.0.exe`**](https://github.com/nt6749/sunhacks-project2/releases/download/windows-setup/ErgoGotchi.Setup.1.0.0.exe) | 1. Run the `.exe` installer wizard.<br>2. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>3. Check "Create Desktop Shortcut".<br>4. Click **Install** & launch! |
-| **🍏 macOS (Apple Silicon / Intel)** | [📥 **`ErgoGotchi-1.0.0.dmg`**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
+| **🪟 Windows (10/11)** | [📥 **Download Windows Setup Wizard (`.exe`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Download installer wizard.<br>2. Run the `.exe` installer wizard.<br>3. Choose where to install your files (custom directory or standard `AppData`/`Program Files`).<br>4. Check "Create Desktop Shortcut".<br>5. Click **Install** & launch! |
+| **🍏 macOS (Apple Silicon / Intel)** | [📥 **Download macOS Disk Image (`.dmg`)**](https://github.com/nt6749/sunhacks-project2/releases) | 1. Open the `.dmg` file.<br>2. Drag the **ErgoGotchi** duck icon into your **Applications** folder.<br>3. Launch from Launchpad or Applications! |
 
 #### 🪄 The First-Run Onboarding Wizard
 When you open ErgoGotchi for the first time, a cute setup wizard appears:
@@ -136,14 +149,7 @@ When you open ErgoGotchi for the first time, a cute setup wizard appears:
 
 ---
 
-### 📦 Method 2: Standalone Portable Binaries (No Installation Required)
-*If you don't want an installer and just want a single file to double-click:*
-- **Windows Portable**: Download [`ErgoGotchi 1.0.0.exe`](https://github.com/nt6749/sunhacks-project2/releases) and double-click to run anywhere (USB drive, Desktop, etc.).
-- **macOS Disk Image**: Download [`ErgoGotchi-1.0.0.dmg`](https://github.com/nt6749/sunhacks-project2/releases) and drag to your folder.
-
----
-
-### 💻 Method 3: Developer Setup from Source (CLI)
+### 💻 Method 2: Developer Setup from Source (CLI)
 *For developers modifying source code or contributing:*
 
 #### Prerequisites
@@ -204,7 +210,7 @@ npm run package:mac
 
 ---
 
-### 🐳 Method 4: Docker Compose Stack (Tiger Data & Cloud Brain)
+### 🐳 Method 3: Docker Compose Stack (Tiger Data & Cloud Brain)
 *For running the production multi-tenant backend with TimescaleDB hypertables on Vultr or locally:*
 ```bash
 docker compose up -d

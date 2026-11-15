@@ -2,8 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
-  movePet: (x, y) => ipcRenderer.send('pet-move', { x, y }),
-  movePetBy: (dx, dy) => ipcRenderer.send('pet-move-by', { dx, dy }),
+  movePet: (x, y, save = false) => ipcRenderer.send('pet-move', { x, y, save }),
+  movePetBy: (dx, dy, save = false) => ipcRenderer.send('pet-move-by', { dx, dy, save }),
+  getPetPosition: () => ipcRenderer.invoke('get-pet-position'),
   setPetBounds: (bounds) => ipcRenderer.send('pet-set-bounds', bounds),
   openDashboard: () => ipcRenderer.send('open-dashboard'),
   setIgnoreMouse: (ignore) => ipcRenderer.send('pet-ignore-mouse', ignore),
@@ -24,4 +25,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setWizardActive: (active) => ipcRenderer.send('wizard-active', active),
   centerPet: (width, height) => ipcRenderer.send('pet-center', { width, height }),
   dockPet: () => ipcRenderer.send('pet-dock-corner'),
+  onPetDocked: (callback) => ipcRenderer.on('menu-pet-docked', callback),
+  setAlwaysShowCorn: (show) => ipcRenderer.send('set-always-show-corn', show),
+  onAlwaysShowCornChanged: (callback) => ipcRenderer.on('always-show-corn-changed', (event, val) => callback(val)),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadAndInstallUpdate: (asset) => ipcRenderer.invoke('download-and-install-update', asset),
+  onUpdateProgress: (callback) => ipcRenderer.on('update-download-progress', (event, data) => callback(data)),
+  onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (event, data) => callback(data)),
+  getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
+  setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('set-login-item-settings', openAtLogin),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  onMenuCheckUpdates: (callback) => ipcRenderer.on('menu-check-updates', () => callback()),
 });

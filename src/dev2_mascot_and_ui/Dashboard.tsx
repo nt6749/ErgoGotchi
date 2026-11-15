@@ -6,10 +6,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { DifficultyLevel, PetState } from '../types';
+import { DifficultyLevel, PetState, UpdateInfo, UpdateProgress } from '../types';
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
 import { MyDuck } from './MyDuck';
 import { DEFAULT_SKIN, type EggShellSkin } from './eggShellSkins';
+import { CameraScreen } from './CameraScreen';
 import type { ForcedActivity } from './PixelMascot';
 import {
   ADULT_LEVEL,
@@ -106,6 +107,21 @@ interface DashboardProps {
   // Difficulty setting
   difficulty?: DifficultyLevel;
   onSetDifficulty?: (level: DifficultyLevel) => void;
+
+  // Biometrics & camera diagnostics
+  isPresent?: boolean;
+  isCalibrating?: boolean;
+  calibrationProgress?: number;
+
+  // Auto-Updates & System Startup
+  appVersion?: string;
+  updateInfo?: UpdateInfo | null;
+  updateProgress?: UpdateProgress | null;
+  isUpdating?: boolean;
+  onCheckForUpdates?: () => Promise<UpdateInfo>;
+  onTriggerUpdate?: (asset?: { name: string; downloadUrl: string; size?: number } | null) => void;
+  launchOnStartup?: boolean;
+  onToggleLaunchOnStartup?: (enabled: boolean) => void;
 }
 
 type TabId = 'analytics' | 'myduck' | 'quests' | 'tigerdata' | 'demo' | 'settings';
@@ -115,7 +131,7 @@ const TABS: Array<{ id: TabId; icon: string; label: string }> = [
   { id: 'quests', icon: '🎯', label: 'Quests' },
   { id: 'tigerdata', icon: '🐅', label: 'Tiger Data' },
   { id: 'demo', icon: '🎬', label: 'Demo' },
-  { id: 'settings', icon: '⚙️', label: 'Difficulty' },
+  { id: 'settings', icon: '⚙️', label: 'Settings' },
 ];
 
 /** A row of choices where the current one is shown as "on". */
@@ -178,7 +194,112 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onSelectSkin,
   difficulty,
   onSetDifficulty,
+  isPresent = true,
+  isCalibrating = false,
+  calibrationProgress = 0,
+  appVersion = '1.0.1',
+  updateInfo = null,
+  updateProgress = null,
+  isUpdating = false,
+  onCheckForUpdates,
+  onTriggerUpdate,
+  launchOnStartup = false,
+  onToggleLaunchOnStartup,
 }) => {
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.autoCheckUpdates') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const [autoInstallUpdates, setAutoInstallUpdates] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.autoInstallUpdates') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [alwaysShowCorn, setAlwaysShowCorn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.alwaysShowCorn') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleAlwaysShowCorn = (checked: boolean) => {
+    setAlwaysShowCorn(checked);
+    try {
+      localStorage.setItem('ergogotchi.alwaysShowCorn', String(checked));
+      window.dispatchEvent(new CustomEvent('always-show-corn-changed', { detail: checked }));
+    } catch {}
+    if ((window as any).electronAPI?.setAlwaysShowCorn) {
+      (window as any).electronAPI.setAlwaysShowCorn(checked);
+    }
+  };
+
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'ergogotchi.alwaysShowCorn') {
+        setAlwaysShowCorn(e.newValue !== 'false');
+      }
+    };
+    const handleCustom = (e: any) => {
+      if (typeof e.detail === 'boolean') {
+        setAlwaysShowCorn(e.detail);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('always-show-corn-changed', handleCustom);
+    if ((window as any).electronAPI?.onAlwaysShowCornChanged) {
+      (window as any).electronAPI.onAlwaysShowCornChanged((val: boolean) => {
+        setAlwaysShowCorn(val);
+        try {
+          localStorage.setItem('ergogotchi.alwaysShowCorn', String(val));
+        } catch {}
+      });
+    }
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('always-show-corn-changed', handleCustom);
+    };
+  }, []);
+
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [checkResult, setCheckResult] = useState<UpdateInfo | null>(updateInfo || null);
+
+  useEffect(() => {
+    if (updateInfo) setCheckResult(updateInfo);
+  }, [updateInfo]);
+
+  const handleToggleAutoCheck = (checked: boolean) => {
+    setAutoCheckUpdates(checked);
+    try {
+      localStorage.setItem('ergogotchi.autoCheckUpdates', String(checked));
+    } catch {}
+  };
+
+  const handleToggleAutoInstall = (checked: boolean) => {
+    setAutoInstallUpdates(checked);
+    try {
+      localStorage.setItem('ergogotchi.autoInstallUpdates', String(checked));
+    } catch {}
+  };
+
+  const handleManualCheckClick = async () => {
+    setCheckingUpdates(true);
+    try {
+      if (onCheckForUpdates) {
+        const res = await onCheckForUpdates();
+        setCheckResult(res);
+      }
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
   const [localDifficulty, setLocalDifficulty] = useState<DifficultyLevel>(() => {
     try {
       const saved = localStorage.getItem('ergogotchi.difficulty');
@@ -509,121 +630,144 @@ GROUP BY bucket, session_id;`}</pre>
             </>
           )}
 
-          {/* Demo controls */}
+          {/* Demo controls & Camera diagnostics */}
           {activeTab === 'demo' && (
             <>
               <div className={`${CALLOUT} px-5 py-4`}>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-1.5">🎬 Demo controls</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-1.5">🎬 Demo & Camera Diagnostics</h3>
                 <p className={`text-sm leading-relaxed ${MUTED}`}>
-                  Drive the duck by hand during a demo, e.g. when venue lighting confuses the webcam. Everything here
-                  acts on the duck on your desktop straight away. The key in brackets does the same thing while this
-                  window is focused.
+                  Test your camera live and watch real-time biometric tracking, or drive the duck manually with keyboard hotkeys for live presentations.
                 </p>
               </div>
 
-              <div className={`${CARD} p-5 space-y-5`}>
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>Posture state</h4>
-                  <ChoiceRow<PetState | null>
-                    current={forcedState}
-                    onPick={onForceState}
-                    choices={[
-                      { value: null, label: 'Follow camera [4]' },
-                      { value: 'THRIVING', label: 'Thriving [1]' },
-                      { value: 'NEUTRAL', label: 'Neutral' },
-                      { value: 'SLOUCHING', label: 'Slouching [2]' },
-                      { value: 'WILTED', label: 'Wilted [3]' },
-                      { value: 'AWAY', label: 'Away' },
-                    ]}
-                  />
-                  <button onClick={onShowWarning} className={`${BUTTON_OUTLINE} mt-2`}>
-                    Show posture warning [5]
-                  </button>
-                </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                {/* Column 1: Live Camera Screen Viewfinder */}
+                <CameraScreen
+                  cameras={cameras}
+                  activeCameraId={activeCameraId}
+                  onSelectCamera={onSelectCamera}
+                  onRecalibrate={onRecalibrate}
+                  strainIndex={strainIndex}
+                  blinkRate={blinkRate}
+                  worstSignal={worstSignal}
+                  state={state}
+                  isPresent={isPresent}
+                  isCalibrating={isCalibrating}
+                  calibrationProgress={calibrationProgress}
+                />
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>Activity</h4>
-                  <ChoiceRow<ForcedActivity>
-                    current={forcedActivity}
-                    onPick={onForceActivity}
-                    choices={[
-                      { value: 'AUTO', label: 'Follow my apps [9]' },
-                      { value: 'WATCHING', label: 'Watching TV [6]' },
-                      { value: 'MUSIC', label: 'Music [7]' },
-                      { value: 'WORKING', label: 'Working [8]' },
-                      { value: 'NONE', label: 'Nothing' },
-                    ]}
-                  />
-                </div>
+                {/* Column 2: Presenter Manual Overrides */}
+                <div className={`${CARD} p-5 space-y-5`}>
+                  <div className="flex items-center justify-between pb-2 border-b border-[var(--line)]">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)]">
+                      🎮 Manual Presenter Overrides
+                    </h4>
+                    <span className={`text-[11px] ${MUTED}`}>Hotkeys in brackets</span>
+                  </div>
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>
-                    Age <span className="normal-case font-normal">· now level {pet.level}, {STAGE_TITLES[stage]}</span>
-                  </h4>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, 1))}
-                      className={stage === 'EGG' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
-                    >
-                      Egg
-                    </button>
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, HATCH_LEVEL))}
-                      className={stage === 'BABY' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
-                    >
-                      Baby duck
-                    </button>
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, ADULT_LEVEL))}
-                      className={stage === 'ADULT' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
-                    >
-                      Grown duck
-                    </button>
-                    <button onClick={() => onPetChange((p) => setLevel(p, p.level + 1))} className={BUTTON_OUTLINE}>
-                      Level up +1 []]
-                    </button>
-                    <button
-                      onClick={() => onPetChange((p) => setLevel(p, p.level - 1))}
-                      disabled={pet.level <= 1}
-                      className={BUTTON_OUTLINE}
-                    >
-                      Level down −1 [[]
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>Posture state</h4>
+                    <ChoiceRow<PetState | null>
+                      current={forcedState}
+                      onPick={onForceState}
+                      choices={[
+                        { value: null, label: 'Follow camera [4]' },
+                        { value: 'THRIVING', label: 'Thriving [1]' },
+                        { value: 'NEUTRAL', label: 'Neutral' },
+                        { value: 'SLOUCHING', label: 'Slouching [2]' },
+                        { value: 'WILTED', label: 'Wilted [3]' },
+                        { value: 'AWAY', label: 'Away' },
+                      ]}
+                    />
+                    <button onClick={onShowWarning} className={`${BUTTON_OUTLINE} mt-2`}>
+                      Show posture warning [5]
                     </button>
                   </div>
-                </div>
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>
-                    Corn <span className="normal-case font-normal">· {pet.corn} 🌽 in the pantry, next level costs {need}</span>
-                  </h4>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => onPetChange((p) => grantCorn(p, 10))} className={BUTTON_NEUTRAL}>
-                      +10 corn [X]
-                    </button>
-                    <button onClick={() => onPetChange((p) => grantCorn(p, 100))} className={BUTTON_PRIMARY}>
-                      +100 corn [Z]
-                    </button>
-                    <button onClick={onFeed} disabled={!enoughCorn} className={BUTTON_NEUTRAL}>
-                      Feed [F]
-                    </button>
-                    <button onClick={() => onPetChange((p) => ({ ...p, corn: 0 }))} className={BUTTON_NEUTRAL}>
-                      Empty pantry
-                    </button>
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>Activity</h4>
+                    <ChoiceRow<ForcedActivity>
+                      current={forcedActivity}
+                      onPick={onForceActivity}
+                      choices={[
+                        { value: 'AUTO', label: 'Follow my apps [9]' },
+                        { value: 'WATCHING', label: 'Watching TV [6]' },
+                        { value: 'MUSIC', label: 'Music [7]' },
+                        { value: 'WORKING', label: 'Working [8]' },
+                        { value: 'NONE', label: 'Nothing' },
+                      ]}
+                    />
                   </div>
-                </div>
 
-                <div>
-                  <h4 className={`${LABEL} mb-2`}>Session</h4>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={onToggleDemoMode} aria-pressed={isDemoMode} className={isDemoMode ? BUTTON_SELECTED : BUTTON_NEUTRAL}>
-                      ⚡ Demo mode: {isDemoMode ? 'on' : 'off'} [D]
-                    </button>
-                    <button onClick={onRecalibrate} className={BUTTON_NEUTRAL}>
-                      Calibrate [C]
-                    </button>
-                    <button onClick={() => onPetChange(startOver)} className={BUTTON_NEUTRAL}>
-                      Start over as an egg [E]
-                    </button>
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>
+                      Age <span className="normal-case font-normal">· now level {pet.level}, {STAGE_TITLES[stage]}</span>
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, 1))}
+                        className={stage === 'EGG' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                      >
+                        Egg
+                      </button>
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, HATCH_LEVEL))}
+                        className={stage === 'BABY' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                      >
+                        Baby duck
+                      </button>
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, ADULT_LEVEL))}
+                        className={stage === 'ADULT' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                      >
+                        Grown duck
+                      </button>
+                      <button onClick={() => onPetChange((p) => setLevel(p, p.level + 1))} className={BUTTON_OUTLINE}>
+                        Level up +1 []]
+                      </button>
+                      <button
+                        onClick={() => onPetChange((p) => setLevel(p, p.level - 1))}
+                        disabled={pet.level <= 1}
+                        className={BUTTON_OUTLINE}
+                      >
+                        Level down −1 [[]
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>
+                      Corn <span className="normal-case font-normal">· {pet.corn} 🌽 in the pantry, next level costs {need}</span>
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => onPetChange((p) => grantCorn(p, 10))} className={BUTTON_NEUTRAL}>
+                        +10 corn [X]
+                      </button>
+                      <button onClick={() => onPetChange((p) => grantCorn(p, 100))} className={BUTTON_PRIMARY}>
+                        +100 corn [Z]
+                      </button>
+                      <button onClick={onFeed} disabled={!enoughCorn} className={BUTTON_NEUTRAL}>
+                        Feed [F]
+                      </button>
+                      <button onClick={() => onPetChange((p) => ({ ...p, corn: 0 }))} className={BUTTON_NEUTRAL}>
+                        Empty pantry
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className={`${LABEL} mb-2`}>Session</h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={onToggleDemoMode} aria-pressed={isDemoMode} className={isDemoMode ? BUTTON_SELECTED : BUTTON_NEUTRAL}>
+                        ⚡ Demo mode: {isDemoMode ? 'on' : 'off'} [D]
+                      </button>
+                      <button onClick={onRecalibrate} className={BUTTON_NEUTRAL}>
+                        Calibrate [C]
+                      </button>
+                      <button onClick={() => onPetChange(startOver)} className={BUTTON_NEUTRAL}>
+                        Start over as an egg [E]
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -714,6 +858,228 @@ GROUP BY bucket, session_id;`}</pre>
                     </p>
                   </button>
                 </div>
+              </div>
+
+              {/* ErgoGotchi Auto-Updates Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🔄</span>
+                    <div>
+                      <h3 className="font-bold text-base">ErgoGotchi Updates</h3>
+                      <p className={`text-xs ${MUTED}`}>Check for updates and configure automated version releases</p>
+                    </div>
+                  </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-mono font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    Installed: v{appVersion || '1.0.1'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  {/* Toggle 1: Auto-check on startup */}
+                  <label className={`${PANEL} p-3 rounded-xl flex items-start gap-3 cursor-pointer hover:border-slate-600 transition`}>
+                    <input
+                      type="checkbox"
+                      checked={autoCheckUpdates}
+                      onChange={(e) => handleToggleAutoCheck(e.target.checked)}
+                      className="mt-1 accent-yellow-400 w-4 h-4 cursor-pointer"
+                    />
+                    <div>
+                      <div className="text-xs font-semibold text-[var(--ink)]">Check for updates on startup</div>
+                      <div className={`text-[11px] ${MUTED}`}>
+                        Automatically polls GitHub Releases when ErgoGotchi opens.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Toggle 2: Auto-install before launch */}
+                  <label className={`${PANEL} p-3 rounded-xl flex items-start gap-3 cursor-pointer hover:border-slate-600 transition`}>
+                    <input
+                      type="checkbox"
+                      checked={autoInstallUpdates}
+                      onChange={(e) => handleToggleAutoInstall(e.target.checked)}
+                      className="mt-1 accent-yellow-400 w-4 h-4 cursor-pointer"
+                    />
+                    <div>
+                      <div className="text-xs font-semibold text-[var(--ink)]">Auto-install updates before launch</div>
+                      <div className={`text-[11px] ${MUTED}`}>
+                        Installs new releases automatically with a download progress indicator window.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Manual Check Button & Result */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[var(--line)]">
+                  <button
+                    type="button"
+                    onClick={handleManualCheckClick}
+                    disabled={checkingUpdates || isUpdating}
+                    className={`${BUTTON_PRIMARY} flex items-center gap-2`}
+                  >
+                    <span>{checkingUpdates ? '⏳' : '🔍'}</span>
+                    <span>{checkingUpdates ? 'Checking GitHub...' : 'Check for Updates Now'}</span>
+                  </button>
+
+                  {checkResult && (
+                    <div className="text-xs font-semibold">
+                      {checkResult.updateAvailable ? (
+                        <span className="text-cyan-400 flex items-center gap-1.5">
+                          <span>⚡</span> Update {checkResult.latestVersion} is available!
+                        </span>
+                      ) : checkResult.error ? (
+                        <span className="text-rose-400">⚠️ {checkResult.error}</span>
+                      ) : (
+                        <span className="text-emerald-400">✓ ErgoGotchi is up to date!</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Update Available Highlight Card */}
+                {checkResult?.updateAvailable && (
+                  <div className="p-4 rounded-xl bg-cyan-950/40 border border-cyan-500/50 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-cyan-300 uppercase tracking-wider">
+                          🚀 New Version {checkResult.latestVersion} Available
+                        </h4>
+                        <p className={`text-[11px] ${MUTED}`}>
+                          {checkResult.releaseName || 'Bug fixes, performance improvements & new pet animations'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onTriggerUpdate?.(checkResult.asset)}
+                        disabled={isUpdating}
+                        className={`${BUTTON_PRIMARY} !bg-cyan-400 !text-slate-950 !border-cyan-400 font-bold`}
+                      >
+                        {isUpdating ? 'Downloading...' : 'Update & Restart Now'}
+                      </button>
+                    </div>
+                    {checkResult.releaseNotes && (
+                      <div className="text-[11px] text-slate-300 bg-slate-900/60 p-2.5 rounded-lg max-h-24 overflow-y-auto font-mono whitespace-pre-wrap select-text">
+                        {checkResult.releaseNotes}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Launch at System Startup Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🚀</span>
+                    <div>
+                      <h3 className="font-bold text-base">Launch at System Startup</h3>
+                      <p className={`text-xs ${MUTED}`}>Configure ErgoGotchi to start automatically when your PC boots</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-mono font-semibold ${
+                    launchOnStartup
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                  }`}>
+                    {launchOnStartup ? 'ENABLED' : 'DISABLED'}
+                  </span>
+                </div>
+
+                <label className={`${PANEL} p-3.5 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-600 transition`}>
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-semibold text-[var(--ink)]">
+                      Start ErgoGotchi automatically when you log into your computer
+                    </div>
+                    <div className={`text-[11px] ${MUTED}`}>
+                      Launches your pet docked in the screen corner so posture feedback is ready from your first line of code.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={launchOnStartup}
+                    onChange={(e) => onToggleLaunchOnStartup?.(e.target.checked)}
+                    className="accent-yellow-400 w-5 h-5 cursor-pointer ml-4"
+                  />
+                </label>
+              </div>
+
+              {/* Desktop Pet Placement & Draggable Setting */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">📍</span>
+                    <div>
+                      <h3 className="font-bold text-base">Desktop Pet Placement</h3>
+                      <p className={`text-xs ${MUTED}`}>Freely drag your duck anywhere on screen or snap back to corner</p>
+                    </div>
+                  </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-mono font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    DRAGGABLE
+                  </span>
+                </div>
+
+                <div className={`${PANEL} p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3`}>
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-[var(--ink)]">
+                      Move your pet freely across monitors and desktop space
+                    </div>
+                    <div className={`text-[11px] ${MUTED}`}>
+                      Click and hold your duck to drag it to any corner, edge, or secondary monitor. Your position is automatically saved across sessions!
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if ((window as any).electronAPI?.dockPet) {
+                        (window as any).electronAPI.dockPet();
+                      } else {
+                        localStorage.removeItem('ergogotchi_web_pet_offset');
+                        window.dispatchEvent(new CustomEvent('pet-docked'));
+                      }
+                    }}
+                    className={`${BUTTON_PRIMARY} whitespace-nowrap flex items-center gap-1.5`}
+                  >
+                    <span>📌</span>
+                    <span>Dock to Corner</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Pet Display: Always Show Corn Level Overlay Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🌽</span>
+                    <div>
+                      <h3 className="font-bold text-base">Corn Level & Pantry Overlay</h3>
+                      <p className={`text-xs ${MUTED}`}>Choose whether the corn progress card stays pinned above your pet</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-mono font-semibold ${
+                    alwaysShowCorn
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                  }`}>
+                    {alwaysShowCorn ? 'ALWAYS VISIBLE' : 'ON HOVER ONLY'}
+                  </span>
+                </div>
+
+                <label className={`${PANEL} p-3.5 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-600 transition`}>
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-semibold text-[var(--ink)]">
+                      Always show corn level above pet
+                    </div>
+                    <div className={`text-[11px] ${MUTED}`}>
+                      When enabled (default), your corn count and level-up requirement stay visible above your pet at all times. If unchecked, the indicator only appears while hovering.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={alwaysShowCorn}
+                    onChange={(e) => handleToggleAlwaysShowCorn(e.target.checked)}
+                    className="accent-yellow-400 w-5 h-5 cursor-pointer ml-4"
+                  />
+                </label>
               </div>
 
               {/* Dev 1 Biometric Safeguards Overview */}
