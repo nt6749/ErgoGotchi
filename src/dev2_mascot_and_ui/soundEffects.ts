@@ -96,6 +96,48 @@ class SoundEffectsEngine {
     osc.stop(now + 0.3);
   }
 
+  /** Plays a run of short notes, one after another. */
+  private playNotes(notes: number[], step: number, type: OscillatorType, volume: number) {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = now + idx * step;
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(volume, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + step * 2.2);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + step * 2.2);
+    });
+  }
+
+  /** Eating corn: quick crunchy nibbles. */
+  public playEat() {
+    this.playNotes([330, 262, 330, 262, 392], 0.07, 'square', 0.06);
+  }
+
+  /** Not enough corn: a short low "nope". */
+  public playRefuse() {
+    this.playNotes([196, 147], 0.11, 'triangle', 0.12);
+  }
+
+  /** Level up: bright rising fanfare. */
+  public playLevelUp() {
+    this.playNotes([523.25, 659.25, 783.99, 1046.5, 1318.51], 0.09, 'square', 0.07);
+  }
+
+  /** Hatching: a few shell taps, then a happy chirp. */
+  public playHatch() {
+    this.playNotes([180, 220, 180, 260, 880, 1174.66, 1567.98], 0.16, 'triangle', 0.12);
+  }
+
   public playSlouchMelt() {
     if (!this.enabled) return;
     this.initCtx();
