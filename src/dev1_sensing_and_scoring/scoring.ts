@@ -17,6 +17,7 @@ export const NORMAL_PARAMS: ScoringParams = {
   sustainedSlouchSeconds: 30.0,
   speechCooldownSeconds: 300.0,
   lowBlinkWindowSeconds: 60.0,
+  warnAtHp: 50,
 };
 
 export const DEMO_PARAMS: ScoringParams = {
@@ -26,6 +27,7 @@ export const DEMO_PARAMS: ScoringParams = {
   sustainedSlouchSeconds: 3.0,
   speechCooldownSeconds: 15.0,
   lowBlinkWindowSeconds: 15.0,
+  warnAtHp: 50,
 };
 
 export function createInitialState(): ScoringState {
@@ -110,7 +112,8 @@ export function step(
     { name: 'head_pitch', score: headPitchScore },
     { name: 'lean_in', score: leanInScore },
     { name: 'tilt', score: tiltScore },
-    { name: 'blink_rate', score: 0.6 * blinkScore },
+    // Kept below the 0.5 decay threshold: low blinking earns a LOW_BLINK nudge, never HP loss on its own
+    { name: 'blink_rate', score: 0.45 * blinkScore },
   ];
 
   // Maximum rule: single worst strain dictates strain index
@@ -164,7 +167,11 @@ export function step(
 
   if (next.state === 'SLOUCHING') {
     next.sustainedSlouchTimer += dt;
-    if (next.sustainedSlouchTimer >= params.sustainedSlouchSeconds && next.speechCooldownTimer <= 0) {
+    if (
+      next.sustainedSlouchTimer >= params.sustainedSlouchSeconds &&
+      next.speechCooldownTimer <= 0 &&
+      next.hp <= params.warnAtHp
+    ) {
       next.triggerIntervention = true;
       next.interventionReason = 'SLOUCH';
       next.sustainedSlouchTimer = 0;

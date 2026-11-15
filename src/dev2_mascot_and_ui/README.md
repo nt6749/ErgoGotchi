@@ -12,6 +12,9 @@ You own the **Mascot Personality, Visual Art & Physics Engine**, the **Transpare
 
 ## 📂 Files You Own
 - **`MascotSprite.tsx`**: High-fidelity SVG character graphics, state animation loops (Thriving, Neutral, Slouching Puddle, Wilted Ghost, Calibrating, Away), petting squish physics, floating hearts (`♥`), and typewriter comic speech bubble.
+- **`PixelMascot.tsx`**: Picks and renders the pixel mascot. `MASCOT_STYLE` switches between `'duck'` (default), `'sprout'` and `'blob'` (the original SVG art above); also holds the low-HP "tired" threshold and the knife emote.
+- **`duckSprites.ts`**: Pixel duck art (24x24, one character per pixel) for every state plus the animated `KNIFE` ("Don't duck with me") and `TIRED` (coffee mug) looks.
+- **`pixelSprites.ts`**: Pixel sprout-blob art (20x18), the alternative `'sprout'` style.
 - **`soundEffects.ts`**: Web Audio API procedural retro 8-bit sound synthesizer (petting harp, warning chime, slouch squish slide, and uplifting victory fanfare on posture revive). Zero external audio files required!
 - **`Dashboard.tsx`**: Pop-out companion analytics view with 30-min strain velocity curves (`ergo_1min`), ocular blink rate timeline, biomechanical stretch guide, Tiger Data hypertable stats, and presenter hotkeys.
 - **`electron/main.cjs` & `preload.cjs`**: Frameless, transparent, always-on-top Electron window, dynamic `setBounds` expansion for speech bubbles, right-click context menu, and packaging configuration.

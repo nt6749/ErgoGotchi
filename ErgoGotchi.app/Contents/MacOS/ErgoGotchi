@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# ErgoGotchi macOS Native App Launcher
+# Automatically initializes paths, starts backend & frontend, and opens the desktop mascot.
+
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cargo/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -n 1)/bin:$PATH"
+
+# Resolve repository directory (adjacent parent, or fallback to fixed workspace)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+if [ ! -f "$APP_DIR/scripts/launcher.cjs" ]; then
+    # Fallback if user moved ErgoGotchi.app to Desktop or /Applications
+    APP_DIR="/Users/nigeltang/Coding/sunhacks2/sunhacks-project2"
+fi
+
+cd "$APP_DIR"
+
+# Launch unified launcher
+exec node "$APP_DIR/scripts/launcher.cjs"

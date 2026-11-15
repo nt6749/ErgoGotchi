@@ -1,0 +1,19 @@
+# ErgoGotchi Code Ownership & Review Rules
+# Enforces domain reviews so developers don't inadvertently modify each other's work
+
+# Default fallback
+* @nt6749
+
+# Developer 1: Sensing, Biometrics & Scoring Engine
+/src/dev1_sensing_and_scoring/ @nt6749
+
+# Developer 2: Mascot Experience & Desktop Shell
+/src/dev2_mascot_and_ui/ @caobach005
+/electron/ @caobach005
+
+# Developer 3: Cloud Brain, Tiger Data & Gemini Backend
+/backend/ @nt6749
+
+# Critical project configs (require review)
+package.json @nt6749 @caobach005
+docker-compose.yml @nt6749
