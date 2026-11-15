@@ -5,30 +5,44 @@
 
 import { 
   BiometricSignals, 
+  DifficultyLevel,
   PetState, 
   ScoringParams, 
   ScoringState 
 } from '../types';
 
-export const NORMAL_PARAMS: ScoringParams = {
-  slouchDwellSeconds: 5.0,
-  decayRate: 0.10,           // Empties full HP bar in ~17 mins at 1.0 strain
-  recoverRate: 0.05,
-  sustainedSlouchSeconds: 30.0,
-  speechCooldownSeconds: 300.0,
-  lowBlinkWindowSeconds: 60.0,
-  warnAtHp: 50,
+export const DIFFICULTY_PRESETS: Record<DifficultyLevel, ScoringParams> = {
+  strict: {
+    slouchDwellSeconds: 0.5,    // Demanding 0.5s posture reaction
+    decayRate: 4.0,
+    recoverRate: 6.0,
+    sustainedSlouchSeconds: 2.0,
+    speechCooldownSeconds: 20.0,
+    lowBlinkWindowSeconds: 20.0,
+    warnAtHp: 55,
+  },
+  normal: {
+    slouchDwellSeconds: 1.5,    // Standard balanced 1.5s reaction
+    decayRate: 2.5,
+    recoverRate: 4.0,
+    sustainedSlouchSeconds: 4.0,
+    speechCooldownSeconds: 30.0,
+    lowBlinkWindowSeconds: 30.0,
+    warnAtHp: 50,
+  },
+  forgiving: {
+    slouchDwellSeconds: 3.0,    // Relaxed 3.0s reaction
+    decayRate: 0.8,
+    recoverRate: 2.0,
+    sustainedSlouchSeconds: 10.0,
+    speechCooldownSeconds: 60.0,
+    lowBlinkWindowSeconds: 45.0,
+    warnAtHp: 40,
+  },
 };
 
-export const DEMO_PARAMS: ScoringParams = {
-  slouchDwellSeconds: 1.5,
-  decayRate: 6.0,            // Empties bar in ~17s for live 3-min hackathon pitch
-  recoverRate: 8.0,          // Quick 12s recovery for judge walkthrough
-  sustainedSlouchSeconds: 3.0,
-  speechCooldownSeconds: 15.0,
-  lowBlinkWindowSeconds: 15.0,
-  warnAtHp: 50,
-};
+export const NORMAL_PARAMS: ScoringParams = DIFFICULTY_PRESETS.normal;
+export const DEMO_PARAMS: ScoringParams = DIFFICULTY_PRESETS.strict;
 
 export function createInitialState(): ScoringState {
   return {
@@ -39,6 +53,7 @@ export function createInitialState(): ScoringState {
     sustainedSlouchTimer: 0.0,
     speechCooldownTimer: 0.0,
     lowBlinkTimer: 0.0,
+    lowBlinkAccumulator: 0.0,
     lastPresentAt: Date.now(),
     triggerIntervention: false,
     isReviving: false,
@@ -92,18 +107,18 @@ export function step(
   }
 
   // 3. Compute individual signal strain scores (0 to 1)
-  // Guard: Yaw > 15 deg suppresses forward_head check to prevent false turns
-  const forwardHeadScore = Math.abs(signals.head_yaw_deg) > 15 
+  // Guard: Yaw > 20 deg suppresses forward_head check to prevent false turns (multi-monitor guard)
+  const forwardHeadScore = Math.abs(signals.head_yaw_deg) > 20 
     ? 0.0 
-    : scoreRange(signals.forward_head, 0.06, 0.18);
+    : scoreRange(signals.forward_head, 0.08, 0.20); // slightly more forgiving (0.08 to 0.20)
 
-  const headDropScore = scoreRange(signals.head_drop, 0.08, 0.22);
-  const headPitchScore = scoreRange(signals.head_pitch_deg, 12, 30);
-  const leanInScore = scoreRange(signals.lean_in, 0.10, 0.30);
-  const tiltScore = scoreRange(signals.shoulder_tilt_deg, 4, 12);
+  const headDropScore = scoreRange(signals.head_drop, 0.10, 0.24); // slightly more forgiving (0.10 to 0.24)
+  const headPitchScore = scoreRange(signals.head_pitch_deg, 14, 32); // slightly more forgiving (14° to 32°)
+  const leanInScore = scoreRange(signals.lean_in, 0.12, 0.32); // slightly more forgiving (0.12 to 0.32)
+  const tiltScore = scoreRange(signals.shoulder_tilt_deg, 5, 13); // slightly more forgiving (5° to 13°)
 
-  // Invert blink score: <8 starts strain, <=3 is 1.0 strain
-  const blinkScore = scoreRange(signals.blink_rate_1m, 8, 3);
+  // Invert blink score: <7 starts strain, <=2 is 1.0 strain
+  const blinkScore = scoreRange(signals.blink_rate_1m, 7, 2);
 
   // Map scores to signal names to identify worst culprit for stretch cues
   const scoreMap = [
@@ -112,7 +127,7 @@ export function step(
     { name: 'head_pitch', score: headPitchScore },
     { name: 'lean_in', score: leanInScore },
     { name: 'tilt', score: tiltScore },
-    // Kept below the 0.5 decay threshold: low blinking earns a LOW_BLINK nudge, never HP loss on its own
+    // Kept below the 0.5 decay threshold: low blinking earns a LOW_BLINK nudge + optical drain
     { name: 'blink_rate', score: 0.45 * blinkScore },
   ];
 
@@ -137,10 +152,23 @@ export function step(
   // 5. HP decay / recover logic
   if (next.strainIndex >= 0.5) {
     next.hp = Math.max(0, next.hp - params.decayRate * next.strainIndex * dt);
-  } else if (next.strainIndex < 0.3) {
+  } else if (next.strainIndex < 0.3 && signals.blink_rate_1m >= 7) {
     next.hp = Math.min(100, next.hp + params.recoverRate * dt);
   }
   // Between 0.3 and 0.5: HP holds without flickering
+
+  // 5b. Optical Fixation & Low Blink Exponential Drain:
+  // Staring (<7 blinks/min) starts draining HP very slowly, accelerating exponentially every minute
+  if (signals.blink_rate_1m < 7) {
+    next.lowBlinkAccumulator = (next.lowBlinkAccumulator ?? 0) + dt;
+    const minutesUnder = next.lowBlinkAccumulator / 60.0;
+    // Base 0.05 HP/s (~3 HP in first min), doubling each minute under threshold
+    const blinkDrainRate = 0.05 * Math.pow(2, minutesUnder);
+    next.hp = Math.max(0, next.hp - blinkDrainRate * dt);
+  } else {
+    // Normal blinking resumes -> smoothly drain optical fatigue accumulator
+    next.lowBlinkAccumulator = Math.max(0, (next.lowBlinkAccumulator ?? 0) - dt * 2.0);
+  }
 
   // 6. State Machine: evaluated in strict priority order
   const isSlouching = next.slouchDwellAccumulator >= params.slouchDwellSeconds;
@@ -181,8 +209,8 @@ export function step(
     next.sustainedSlouchTimer = 0;
   }
 
-  // Low blink intervention trigger
-  if (signals.blink_rate_1m < 8 && next.strainIndex < 0.5) {
+  // Low blink intervention trigger (<7 blinks/min triggers cute comic speech bubble nudge)
+  if (signals.blink_rate_1m < 7 && next.strainIndex < 0.5) {
     next.lowBlinkTimer += dt;
     if (next.lowBlinkTimer >= params.lowBlinkWindowSeconds && next.speechCooldownTimer <= 0) {
       next.triggerIntervention = true;

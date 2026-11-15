@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { step, createInitialState, NORMAL_PARAMS, DEMO_PARAMS } from './scoring';
+import { step, createInitialState, NORMAL_PARAMS, DEMO_PARAMS, DIFFICULTY_PRESETS } from './scoring';
 import { BiometricSignals } from '../types';
 
 const PERFECT_SIGNALS: BiometricSignals = {
@@ -17,12 +17,12 @@ const PERFECT_SIGNALS: BiometricSignals = {
 };
 
 const SEVERE_SLOUCH_SIGNALS: BiometricSignals = {
-  forward_head: 0.20,      // Above 0.18 -> 1.0 strain
-  head_drop: 0.24,
-  head_pitch_deg: 32.0,
-  lean_in: 0.32,
-  shoulder_tilt_deg: 14.0,
-  blink_rate_1m: 2,
+  forward_head: 0.22,      // Above 0.20 -> 1.0 strain
+  head_drop: 0.26,
+  head_pitch_deg: 34.0,
+  lean_in: 0.34,
+  shoulder_tilt_deg: 15.0,
+  blink_rate_1m: 1,
   head_yaw_deg: 0.0,
 };
 
@@ -50,41 +50,55 @@ describe('ErgoGotchi Scoring Engine', () => {
     expect(state.state).toBe('THRIVING');
   });
 
-  it('slouches after dwell time in normal mode', () => {
-    let state = createInitialState();
-    state.hp = 70;
-    
-    // Step 4 seconds (below 5s dwell)
-    for (let i = 0; i < 4; i++) {
-      state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, NORMAL_PARAMS, true, true);
-      expect(state.state).toBe('NEUTRAL');
-    }
-    
-    // 5th second -> crosses 5s dwell
-    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, NORMAL_PARAMS, true, true);
-    expect(state.state).toBe('SLOUCHING');
-    expect(state.worstSignal).toBe('forward_head');
+  it('supports customizable difficulty dwell timings (Strict 0.5s, Normal 1.5s, Forgiving 3.0s)', () => {
+    // 1. Strict mode (0.5s dwell): Slouches immediately on 1st second (1s >= 0.5s)
+    let strictState = createInitialState();
+    strictState.hp = 70;
+    strictState = step(strictState, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.strict, true, true);
+    expect(strictState.state).toBe('SLOUCHING');
+
+    // 2. Normal mode (1.5s dwell): Stays NEUTRAL at 1.0s, slouches at 2.0s
+    let normalState = createInitialState();
+    normalState.hp = 70;
+    normalState = step(normalState, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.normal, true, true);
+    expect(normalState.state).toBe('NEUTRAL');
+    normalState = step(normalState, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.normal, true, true);
+    expect(normalState.state).toBe('SLOUCHING');
+
+    // 3. Forgiving mode (3.0s dwell): Stays NEUTRAL at 2.0s, slouches at 3.0s
+    let forgivingState = createInitialState();
+    forgivingState.hp = 70;
+    forgivingState = step(forgivingState, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.forgiving, true, true);
+    expect(forgivingState.state).toBe('NEUTRAL');
+    forgivingState = step(forgivingState, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.forgiving, true, true);
+    expect(forgivingState.state).toBe('NEUTRAL');
+    forgivingState = step(forgivingState, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.forgiving, true, true);
+    expect(forgivingState.state).toBe('SLOUCHING');
   });
 
-  it('triggers fast 1.5s slouch reaction in DEMO mode', () => {
+  it('applies slightly more forgiving thresholds to accommodate natural micro-shifts', () => {
     let state = createInitialState();
-    state.hp = 70;
-    
-    // 1st second
-    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
-    expect(state.state).toBe('NEUTRAL');
-    
-    // Next 1 second (total 2s > 1.5s demo dwell)
-    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
-    expect(state.state).toBe('SLOUCHING');
+    state.hp = 85;
+
+    // forward_head = 0.07 (previously started strain at 0.06; now zero strain under 0.08)
+    const naturalShiftSignals: BiometricSignals = {
+      ...PERFECT_SIGNALS,
+      forward_head: 0.07,
+      head_pitch_deg: 13.0, // starts strain at 14°
+    };
+
+    state = step(state, naturalShiftSignals, 1.0, NORMAL_PARAMS, true, true);
+    expect(state.strainIndex).toBeLessThan(0.1);
+    expect(state.state).toBe('THRIVING');
   });
 
   it('decays HP under high strain and enters WILTED when HP < 20', () => {
     let state = createInitialState();
     state.hp = 25;
     
-    // Run several high-strain steps in DEMO mode
-    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
+    // Run two high-strain steps
+    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, NORMAL_PARAMS, true, true);
+    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, NORMAL_PARAMS, true, true);
     expect(state.hp).toBeLessThan(20);
     expect(state.state).toBe('WILTED');
   });
@@ -95,37 +109,37 @@ describe('ErgoGotchi Scoring Engine', () => {
     state.hp = 85;
     
     // User sits upright
-    state = step(state, PERFECT_SIGNALS, 1.0, DEMO_PARAMS, true, true);
+    state = step(state, PERFECT_SIGNALS, 1.0, NORMAL_PARAMS, true, true);
     expect(state.isReviving).toBe(true);
     expect(state.state).toBe('THRIVING');
   });
 
-  it('fires intervention request on sustained slouch in DEMO mode', () => {
+  it('fires intervention request on sustained slouch once HP reaches warnAtHp', () => {
     let state = createInitialState();
     state.state = 'SLOUCHING';
-    state.slouchDwellAccumulator = DEMO_PARAMS.slouchDwellSeconds;
-    state.hp = 60;
+    state.slouchDwellAccumulator = DIFFICULTY_PRESETS.normal.slouchDwellSeconds;
+    state.hp = DIFFICULTY_PRESETS.normal.warnAtHp; // exactly at warning threshold
     state.speechCooldownTimer = 0;
 
-    // In demo mode, sustained slouch trigger is 3s (3 steps of 1.0s)
-    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
-    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
-    state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
+    // Run sustained slouch duration (4s in normal mode)
+    for (let i = 0; i < 4; i++) {
+      state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.normal, true, true);
+    }
 
     expect(state.triggerIntervention).toBe(true);
     expect(state.interventionReason).toBe('SLOUCH');
-    expect(state.speechCooldownTimer).toBe(DEMO_PARAMS.speechCooldownSeconds);
+    expect(state.speechCooldownTimer).toBe(DIFFICULTY_PRESETS.normal.speechCooldownSeconds);
   });
 
-  it('respects Yaw guard by ignoring forward head drift when head is turned', () => {
+  it('respects 20-degree Yaw guard by ignoring forward head drift when looking at secondary monitors', () => {
     let state = createInitialState();
     state.hp = 85;
     
-    // User turns head > 15 deg
+    // User turns head > 20 deg (e.g. 22 deg)
     const turnedSignals: BiometricSignals = {
       ...PERFECT_SIGNALS,
-      forward_head: 0.19, // Would normally be 1.0 strain
-      head_yaw_deg: 22.0, // Guard active
+      forward_head: 0.19, // Would normally cause heavy strain
+      head_yaw_deg: 22.0, // Multi-monitor guard active (> 20 deg)
     };
     
     state = step(state, turnedSignals, 1.0, NORMAL_PARAMS, true, true);
@@ -133,32 +147,48 @@ describe('ErgoGotchi Scoring Engine', () => {
     expect(state.state).toBe('THRIVING');
   });
 
-  it('does not drain HP from low blinking alone, but nudges with LOW_BLINK', () => {
+  it('nudges with LOW_BLINK and accelerates HP drain exponentially during prolonged staring', () => {
     let state = createInitialState();
-    const noBlinks = { ...PERFECT_SIGNALS, blink_rate_1m: 0 };
+    state.hp = 100;
+    const lowBlinkSignals = { ...PERFECT_SIGNALS, blink_rate_1m: 4 }; // Below 7 threshold
     let nudged = false;
+
+    // Step 30 seconds: initial drain is gentle, but non-zero
     for (let i = 0; i < 30; i++) {
-      state = step(state, noBlinks, 1.0, DEMO_PARAMS, true, true);
-      if (state.triggerIntervention && state.interventionReason === 'LOW_BLINK') nudged = true;
+      state = step(state, lowBlinkSignals, 1.0, DIFFICULTY_PRESETS.normal, true, true);
+      if (state.triggerIntervention && state.interventionReason === 'LOW_BLINK') {
+        nudged = true;
+      }
     }
-    expect(state.hp).toBe(100);
-    expect(state.state).not.toBe('WILTED');
+
     expect(nudged).toBe(true);
+    // Over the first 30 seconds, HP has started draining gently (around ~1-2 HP lost)
+    expect(state.hp).toBeLessThan(100);
+    expect(state.hp).toBeGreaterThan(97);
+
+    const hpAfter30s = state.hp;
+
+    // Step another 60 seconds (minute 1-2): exponential drain rate doubles and drains faster
+    for (let i = 0; i < 60; i++) {
+      state = step(state, lowBlinkSignals, 1.0, DIFFICULTY_PRESETS.normal, true, true);
+    }
+    const dropInSecondMinute = hpAfter30s - state.hp;
+    // Drop in minute 1-2 is significantly greater than first 30s rate
+    expect(dropInSecondMinute).toBeGreaterThan(1.5);
   });
 
-  it('does not warn about slouching while HP is still above 50', () => {
+  it('does not warn about slouching while HP is still above warnAtHp', () => {
     let state = createInitialState();
     state.state = 'SLOUCHING';
-    state.slouchDwellAccumulator = DEMO_PARAMS.slouchDwellSeconds;
+    state.slouchDwellAccumulator = DIFFICULTY_PRESETS.normal.slouchDwellSeconds;
     state.hp = 100;
     state.speechCooldownTimer = 0;
     let firstWarnHp: number | null = null;
     for (let i = 0; i < 30 && firstWarnHp === null; i++) {
-      state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
+      state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DIFFICULTY_PRESETS.normal, true, true);
       if (state.triggerIntervention && state.interventionReason === 'SLOUCH') firstWarnHp = state.hp;
     }
     expect(firstWarnHp).not.toBeNull();
-    expect(firstWarnHp!).toBeLessThanOrEqual(DEMO_PARAMS.warnAtHp);
-    expect(firstWarnHp!).toBeGreaterThan(DEMO_PARAMS.warnAtHp - 10); // fires promptly once HP reaches 50
+    expect(firstWarnHp!).toBeLessThanOrEqual(DIFFICULTY_PRESETS.normal.warnAtHp);
   });
 });

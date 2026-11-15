@@ -8,7 +8,9 @@ __pycache__/
 
 # Production Builds
 dist/
-build/
+build/*
+!build/icon.ico
+!build/icon.png
 release/
 *.egg-info/
 

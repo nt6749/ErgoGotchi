@@ -204,6 +204,11 @@ export class VisionPipeline {
     }
   }
 
+  /** Return active MediaStream so UI previews can share the camera stream without opening a second exclusive device lock */
+  public getVideoStream(): MediaStream | null {
+    return (this.videoElement?.srcObject as MediaStream) || null;
+  }
+
   /** Cameras the user can pick from (labels need camera permission, which Electron grants). */
   public async listCameras(): Promise<CameraOption[]> {
     try {
@@ -482,8 +487,8 @@ export class VisionPipeline {
 
     let forwardHead = fwRatio / Math.max(0.01, fw0Ratio) - 1;
 
-    // Guard: Yaw > 15 deg either way holds last forward_head value
-    if (Math.abs(y) > 15) {
+    // Guard: Yaw > 20 deg either way holds last forward_head value (multi-monitor guard)
+    if (Math.abs(y) > 20) {
       forwardHead = this.lastForwardHead;
     } else {
       this.lastForwardHead = forwardHead;

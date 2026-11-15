@@ -26,12 +26,13 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "build/**/*",
       "package.json"
     ],
     "mac": {
+      "icon": "build/icon.png",
       "target": [
-        "dmg",
-        "dir"
+        "dmg"
       ],
       "category": "public.app-category.productivity"
     },
@@ -55,6 +56,7 @@
       }
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"

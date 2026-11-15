@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAddCorn: (callback) => ipcRenderer.on('menu-add-corn', (event, amount) => callback(amount)),
   onResetGrowth: (callback) => ipcRenderer.on('menu-reset-growth', () => callback()),
   onOpenWizard: (callback) => ipcRenderer.on('menu-open-wizard', callback),
+  onSetDifficulty: (callback) => ipcRenderer.on('menu-set-difficulty', (event, level) => callback(level)),
+  setWizardActive: (active) => ipcRenderer.send('wizard-active', active),
   centerPet: (width, height) => ipcRenderer.send('pet-center', { width, height }),
   dockPet: () => ipcRenderer.send('pet-dock-corner'),
 });

@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { PetState } from '../types';
+import { DifficultyLevel, PetState } from '../types';
 import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
 import { MyDuck } from './MyDuck';
 import { DEFAULT_SKIN, type EggShellSkin } from './eggShellSkins';
@@ -102,15 +102,20 @@ interface DashboardProps {
   // Egg Shell Skin
   skin?: EggShellSkin;
   onSelectSkin?: (skin: EggShellSkin) => void;
+
+  // Difficulty setting
+  difficulty?: DifficultyLevel;
+  onSetDifficulty?: (level: DifficultyLevel) => void;
 }
 
-type TabId = 'analytics' | 'myduck' | 'quests' | 'tigerdata' | 'demo';
+type TabId = 'analytics' | 'myduck' | 'quests' | 'tigerdata' | 'demo' | 'settings';
 const TABS: Array<{ id: TabId; icon: string; label: string }> = [
   { id: 'analytics', icon: '📊', label: 'Telemetry' },
   { id: 'myduck', icon: '🦆', label: 'My DuckDuck' },
   { id: 'quests', icon: '🎯', label: 'Quests' },
   { id: 'tigerdata', icon: '🐅', label: 'Tiger Data' },
   { id: 'demo', icon: '🎬', label: 'Demo' },
+  { id: 'settings', icon: '⚙️', label: 'Difficulty' },
 ];
 
 /** A row of choices where the current one is shown as "on". */
@@ -171,7 +176,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onToggleLock,
   skin = DEFAULT_SKIN,
   onSelectSkin,
+  difficulty,
+  onSetDifficulty,
 }) => {
+  const [localDifficulty, setLocalDifficulty] = useState<DifficultyLevel>(() => {
+    try {
+      const saved = localStorage.getItem('ergogotchi.difficulty');
+      if (saved === 'strict' || saved === 'normal' || saved === 'forgiving') return saved;
+    } catch {}
+    return difficulty || 'normal';
+  });
+
+  const currentDifficulty = difficulty || localDifficulty;
+  const handlePickDifficulty = (level: DifficultyLevel) => {
+    setLocalDifficulty(level);
+    try {
+      localStorage.setItem('ergogotchi.difficulty', level);
+    } catch {}
+    if (onSetDifficulty) onSetDifficulty(level);
+    window.dispatchEvent(new Event('ergogotchi-difficulty-changed'));
+  };
+
   const [activeTab, setActiveTab] = useState<TabId>('analytics');
   const [seriesData, setSeriesData] = useState<any[]>([]);
   const [sessionSummary, setSessionSummary] = useState<string>('Analyzing your focus session...');
@@ -609,6 +634,125 @@ GROUP BY bucket, session_id;`}</pre>
                 quests fill up about 30 times quicker.
               </div>
             </>
+          )}
+
+          {activeTab === 'settings' && (
+            <div className="space-y-6">
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base flex items-center gap-2">
+                    <span>🎚️</span> Posture Reaction Difficulty
+                  </h3>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-mono font-semibold ${
+                    currentDifficulty === 'strict' ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                    currentDifficulty === 'normal' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                    'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                  }`}>
+                    {currentDifficulty.toUpperCase()} ({
+                      currentDifficulty === 'strict' ? '0.5s reaction' :
+                      currentDifficulty === 'normal' ? '1.5s reaction' : '3.0s reaction'
+                    })
+                  </span>
+                </div>
+
+                <p className={`text-xs leading-relaxed ${MUTED}`}>
+                  Controls how quickly the duck registers a slouch. Shorter dwell times encourage strict spinal alignment, while longer dwell times are more forgiving of natural reaching, drinking, and movement.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePickDifficulty('strict')}
+                    className={`p-3.5 rounded-xl border text-left transition-all ${
+                      currentDifficulty === 'strict'
+                        ? 'border-red-400 bg-red-950/30 shadow-lg shadow-red-950/20 ring-1 ring-red-400'
+                        : `${PANEL} hover:border-slate-600`
+                    }`}
+                  >
+                    <div className="font-semibold text-sm text-red-400 mb-1 flex items-center justify-between">
+                      <span>Strict</span>
+                      <span className="font-mono text-xs">0.5s</span>
+                    </div>
+                    <p className={`text-xs ${MUTED}`}>
+                      Immediate posture enforcement. Catches micro-slouches almost instantaneously.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handlePickDifficulty('normal')}
+                    className={`p-3.5 rounded-xl border text-left transition-all ${
+                      currentDifficulty === 'normal'
+                        ? 'border-emerald-400 bg-emerald-950/30 shadow-lg shadow-emerald-950/20 ring-1 ring-emerald-400'
+                        : `${PANEL} hover:border-slate-600`
+                    }`}
+                  >
+                    <div className="font-semibold text-sm text-emerald-400 mb-1 flex items-center justify-between">
+                      <span>Normal</span>
+                      <span className="font-mono text-xs">1.5s</span>
+                    </div>
+                    <p className={`text-xs ${MUTED}`}>
+                      Balanced ergonomic sweet spot. Ideal for daily coding and hackathon walkthroughs.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handlePickDifficulty('forgiving')}
+                    className={`p-3.5 rounded-xl border text-left transition-all ${
+                      currentDifficulty === 'forgiving'
+                        ? 'border-blue-400 bg-blue-950/30 shadow-lg shadow-blue-950/20 ring-1 ring-blue-400'
+                        : `${PANEL} hover:border-slate-600`
+                    }`}
+                  >
+                    <div className="font-semibold text-sm text-blue-400 mb-1 flex items-center justify-between">
+                      <span>Forgiving</span>
+                      <span className="font-mono text-xs">3.0s</span>
+                    </div>
+                    <p className={`text-xs ${MUTED}`}>
+                      Relaxed grace period. Gives ample time to shift positions or reach for notes.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Dev 1 Biometric Safeguards Overview */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <h3 className="font-bold text-sm flex items-center gap-2">
+                  <span>🛡️</span> Biometric Safeguards & Tuning
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div className={`${PANEL} p-3 rounded-lg space-y-1`}>
+                    <div className="font-semibold text-emerald-400">👀 Optical Fixation Guard</div>
+                    <div className={MUTED}>
+                      Blink rate threshold set to &lt;7 blinks/min. Triggers a cute reminder and gently drains HP with an exponential acceleration curve if prolonged.
+                    </div>
+                  </div>
+
+                  <div className={`${PANEL} p-3 rounded-lg space-y-1`}>
+                    <div className="font-semibold text-cyan-400">🖥️ Multi-Monitor Yaw Guard</div>
+                    <div className={MUTED}>
+                      Head turns up to 20° are protected. Turning to look at secondary screens won't trigger false forward-head slouch alerts.
+                    </div>
+                  </div>
+
+                  <div className={`${PANEL} p-3 rounded-lg space-y-1`}>
+                    <div className="font-semibold text-indigo-400">📐 Ergonomic Sensitivities</div>
+                    <div className={MUTED}>
+                      Calibrated with slightly relaxed tolerances (Forward Head 0.08–0.20, Neck Pitch 14°–32°) to accommodate natural breathing and posture variations.
+                    </div>
+                  </div>
+
+                  <div className={`${PANEL} p-3 rounded-lg space-y-1`}>
+                    <div className="font-semibold text-amber-400">☕ Absence Detection</div>
+                    <div className={MUTED}>
+                      If your face leaves the frame for &gt;3 seconds, the pet enters AWAY mode and freezes all health drain until you return.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

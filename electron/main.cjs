@@ -16,6 +16,7 @@ let dashboardWindow = null;
 let backendProcess = null;
 let isWizardActive = false;
 let isPetLocked = true;
+let currentDifficulty = 'normal';
 
 // Cameras reported by the pet window, shown in its right-click menu
 let cameraList = [];
@@ -35,6 +36,9 @@ const ACTIVITY_CHOICES = [
 ];
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const APP_ICON_PATH = process.platform === 'win32'
+  ? path.join(__dirname, '../build/icon.ico')
+  : path.join(__dirname, '../build/icon.png');
 
 function checkBackendAlive() {
   return new Promise((resolve) => {
@@ -107,6 +111,7 @@ function createPetWindow() {
   const initialY = screenHeight - initialHeight - 10;
 
   petWindow = new BrowserWindow({
+    icon: APP_ICON_PATH,
     width: initialWidth,
     height: initialHeight,
     x: initialX,
@@ -146,8 +151,9 @@ function createPetWindow() {
     petWindow.webContents.openDevTools({ mode: 'detach' });
   }
 
-  // Right-click context menu
+  // Right-click context menu (disabled while setup wizard is active)
   petWindow.webContents.on('context-menu', () => {
+    if (isWizardActive) return;
     const contextMenu = Menu.buildFromTemplate([
       {
         label: '🪄 Setup Wizard & Permissions',
@@ -176,6 +182,38 @@ function createPetWindow() {
       {
         label: '⚡ Toggle Demo Mode (D)',
         click: () => petWindow.webContents.send('menu-toggle-demo'),
+      },
+      {
+        label: '🎚️ Difficulty',
+        submenu: [
+          {
+            label: 'Strict (0.5s reaction)',
+            type: 'radio',
+            checked: currentDifficulty === 'strict',
+            click: () => {
+              currentDifficulty = 'strict';
+              petWindow.webContents.send('menu-set-difficulty', 'strict');
+            },
+          },
+          {
+            label: 'Normal (1.5s reaction)',
+            type: 'radio',
+            checked: currentDifficulty === 'normal',
+            click: () => {
+              currentDifficulty = 'normal';
+              petWindow.webContents.send('menu-set-difficulty', 'normal');
+            },
+          },
+          {
+            label: 'Forgiving (3.0s reaction)',
+            type: 'radio',
+            checked: currentDifficulty === 'forgiving',
+            click: () => {
+              currentDifficulty = 'forgiving';
+              petWindow.webContents.send('menu-set-difficulty', 'forgiving');
+            },
+          },
+        ],
       },
       {
         label: '📷 Camera',
@@ -234,6 +272,7 @@ function createDashboardWindow() {
   }
 
   dashboardWindow = new BrowserWindow({
+    icon: APP_ICON_PATH,
     width: 1024,
     height: 720,
     title: 'ErgoGotchi Companion Dashboard - sunhacks 2026',
@@ -322,6 +361,10 @@ ipcMain.on('camera-list', (event, { cameras, activeId }) => {
 
 ipcMain.on('open-dashboard', () => {
   createDashboardWindow();
+});
+
+ipcMain.on('wizard-active', (event, active) => {
+  isWizardActive = !!active;
 });
 
 app.whenReady().then(async () => {

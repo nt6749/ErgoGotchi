@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   BiometricSignals, 
   PetState, 
+  DifficultyLevel,
   ScoringParams, 
   ScoringState, 
   StretchCue 
@@ -14,6 +15,7 @@ import {
 import { 
   createInitialState, 
   DEMO_PARAMS, 
+  DIFFICULTY_PRESETS,
   NORMAL_PARAMS, 
   step 
 } from './dev1_sensing_and_scoring/scoring';
@@ -78,6 +80,8 @@ interface ElectronAPI {
   onAddCorn: (cb: (amount: number) => void) => void;
   onResetGrowth: (cb: () => void) => void;
   onOpenWizard?: (cb: () => void) => void;
+  setWizardActive?: (active: boolean) => void;
+  onSetDifficulty?: (cb: (level: DifficultyLevel) => void) => void;
   centerPet?: (width?: number, height?: number) => void;
   dockPet?: () => void;
   onToggleLock?: (cb: (locked: boolean) => void) => void;
@@ -133,6 +137,23 @@ export const App: React.FC = () => {
   // Application view state
   const [showDashboard, setShowDashboard] = useState(isDashboardView);
   const [isDemoMode, setIsDemoMode] = useState(true); // Default to Demo mode for sunhacks judging!
+  const [difficulty, setDifficulty] = useState<DifficultyLevel>(() => {
+    try {
+      const saved = localStorage.getItem('ergogotchi.difficulty');
+      if (saved === 'strict' || saved === 'normal' || saved === 'forgiving') return saved;
+    } catch {}
+    return 'normal';
+  });
+  const difficultyRef = useRef(difficulty);
+  difficultyRef.current = difficulty;
+
+  const handleSetDifficulty = (level: DifficultyLevel) => {
+    setDifficulty(level);
+    try {
+      localStorage.setItem('ergogotchi.difficulty', level);
+    } catch {}
+  };
+
   const [forcedState, setForcedState] = useState<PetState | null>(null);
   const [showWizard, setShowWizard] = useState<boolean>(() => {
     try {
@@ -369,7 +390,9 @@ export const App: React.FC = () => {
     if (!awardsCorn) return;
 
     const loopInterval = setInterval(() => {
-      const params: ScoringParams = isDemoModeRef.current ? DEMO_PARAMS : NORMAL_PARAMS;
+      const params: ScoringParams = isDemoModeRef.current 
+        ? DEMO_PARAMS 
+        : (DIFFICULTY_PRESETS[difficultyRef.current] || NORMAL_PARAMS);
       const prev = scoringStateRef.current;
       const currentSignals = currentSignalsRef.current;
       const isPresent = isPresentRef.current;
@@ -608,6 +631,15 @@ export const App: React.FC = () => {
     electronAPI.onFeedDuck?.(() => {
       handleFeed();
     });
+    electronAPI.onSetDifficulty?.((level) => handleSetDifficulty(level));
+    const onDiffEvent = () => {
+      try {
+        const saved = localStorage.getItem('ergogotchi.difficulty');
+        if (saved === 'strict' || saved === 'normal' || saved === 'forgiving') setDifficulty(saved);
+      } catch {}
+    };
+    window.addEventListener('ergogotchi-difficulty-changed', onDiffEvent);
+    return () => window.removeEventListener('ergogotchi-difficulty-changed', onDiffEvent);
   }, []);
 
   // 5. Growth and activity: follow the Electron shell and the other window
@@ -637,19 +669,23 @@ export const App: React.FC = () => {
 
   // Handle dynamic pet window size expansion & centering for onboarding wizard
   useEffect(() => {
-    if (isPetWindow && showWizard) {
-      if (electronAPI?.centerPet) {
-        electronAPI.centerPet(480, 640);
-      } else if (electronAPI?.setPetBounds) {
-        electronAPI.setPetBounds({ width: 480, height: 640, center: true });
+    if (isPetWindow) {
+      electronAPI?.setWizardActive?.(showWizard);
+      if (showWizard) {
+        if (electronAPI?.centerPet) {
+          electronAPI.centerPet(480, 640);
+        } else if (electronAPI?.setPetBounds) {
+          electronAPI.setPetBounds({ width: 480, height: 640, center: true });
+        }
+        electronAPI?.setIgnoreMouse?.(false);
       }
-      electronAPI?.setIgnoreMouse?.(false);
     }
   }, [isPetWindow, showWizard]);
 
   const handleWizardComplete = () => {
     setShowWizard(false);
     if (isPetWindow) {
+      electronAPI?.setWizardActive?.(false);
       // Return to original corner dock position
       if (electronAPI?.dockPet) {
         electronAPI.dockPet();
@@ -751,6 +787,8 @@ export const App: React.FC = () => {
           onToggleLock={handleToggleLock}
           skin={eggShellSkin}
           onSelectSkin={handleSelectSkin}
+          difficulty={difficulty}
+          onSetDifficulty={handleSetDifficulty}
         />
       </div>
     );

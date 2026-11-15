@@ -32,7 +32,6 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [cameraTesting, setCameraTesting] = useState(false);
   const videoPreviewRef = useRef<HTMLVideoElement | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
 
   // Audio test state
   const [audioTested, setAudioTested] = useState(false);
@@ -42,81 +41,124 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const [countdown, setCountdown] = useState(5);
   const [calibrationDone, setCalibrationDone] = useState(false);
 
-  // Stop video preview stream on unmount
+  // Stop video preview element on unmount without closing the shared pipeline stream
   useEffect(() => {
     return () => {
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      if (videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = null;
       }
     };
   }, []);
 
-  // Request camera and enumerate devices
-  const requestCameraAccess = async (deviceId?: string) => {
+  // Hook directly into Paul's visionPipeline camera engine on mount and step change
+  useEffect(() => {
+    let mounted = true;
+
+    const syncCameraFromPipeline = async () => {
+      setCameraTesting(true);
+      setCameraError(null);
+
+      try {
+        let stream = visionPipeline.getVideoStream();
+        if (!stream) {
+          await visionPipeline.startCamera();
+          stream = visionPipeline.getVideoStream();
+        }
+
+        const list = await visionPipeline.listCameras();
+        if (!mounted) return;
+
+        setAvailableCameras(list);
+        const activeId = visionPipeline.activeCameraId || (list[0]?.deviceId ?? '');
+        setSelectedCameraId(activeId);
+
+        if (stream && videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = stream;
+          videoPreviewRef.current.play().catch(() => {});
+          setHasCameraPermission(true);
+        } else if (list.length > 0) {
+          setHasCameraPermission(true);
+        }
+      } catch (err: any) {
+        if (!mounted) return;
+        console.warn('[Onboarding] Error syncing camera:', err);
+        setHasCameraPermission(false);
+        setCameraError(err?.message || 'Could not connect to camera.');
+      } finally {
+        if (mounted) setCameraTesting(false);
+      }
+    };
+
+    if (step === 2) {
+      syncCameraFromPipeline();
+    }
+
+    return () => {
+      mounted = false;
+    };
+  }, [step]);
+
+  // Request or re-activate camera using visionPipeline
+  const requestCameraAccess = async () => {
     setCameraTesting(true);
     setCameraError(null);
 
-    // Stop existing test stream if any
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-    }
-
     try {
-      const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
-          : { width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      };
+      const ok = await visionPipeline.startCamera();
+      const list = await visionPipeline.listCameras();
+      setAvailableCameras(list);
+      setSelectedCameraId(visionPipeline.activeCameraId || (list[0]?.deviceId ?? ''));
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      mediaStreamRef.current = stream;
-
-      if (videoPreviewRef.current) {
+      const stream = visionPipeline.getVideoStream();
+      if (videoPreviewRef.current && stream) {
         videoPreviewRef.current.srcObject = stream;
         videoPreviewRef.current.play().catch(() => {});
       }
 
-      setHasCameraPermission(true);
-
-      // Enumerate cameras
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoInputs = devices
-        .filter((d) => d.kind === 'videoinput')
-        .map((d, idx) => ({
-          deviceId: d.deviceId,
-          label: d.label || `Camera ${idx + 1}`,
-        }));
-
-      setAvailableCameras(videoInputs);
-
-      // Determine active device id
-      const track = stream.getVideoTracks()[0];
-      const settings = track?.getSettings();
-      const activeId = settings?.deviceId || videoInputs[0]?.deviceId || '';
-      setSelectedCameraId(activeId);
-      try {
-        localStorage.setItem(CAMERA_PREF_KEY, activeId);
-      } catch {}
-
-      soundEffects.playPet();
+      if (ok && stream) {
+        setHasCameraPermission(true);
+        soundEffects.playPet();
+      } else {
+        setHasCameraPermission(false);
+        setCameraError('Camera did not return a video stream. Please check camera privacy settings.');
+      }
     } catch (err: any) {
-      console.warn('[Onboarding] Camera error:', err);
       setHasCameraPermission(false);
-      setCameraError(err.message || 'Could not access camera. Please check your system privacy settings.');
+      setCameraError(err?.message || 'Could not access camera.');
     } finally {
       setCameraTesting(false);
     }
   };
 
+  // Switch camera using Paul's exact switchCamera() function in visionPipeline
   const handleCameraChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newId = e.target.value;
+    if (!newId || newId === selectedCameraId) return;
+
     setSelectedCameraId(newId);
+    setCameraTesting(true);
+    setCameraError(null);
+
     try {
-      localStorage.setItem(CAMERA_PREF_KEY, newId);
-    } catch {}
-    await requestCameraAccess(newId);
+      const switched = await visionPipeline.switchCamera(newId);
+      const stream = visionPipeline.getVideoStream();
+
+      if (videoPreviewRef.current && stream) {
+        videoPreviewRef.current.srcObject = stream;
+        videoPreviewRef.current.play().catch(() => {});
+      }
+
+      if (switched) {
+        setHasCameraPermission(true);
+        soundEffects.playPet();
+      } else {
+        setCameraError('Could not switch to that camera. Is another application using it?');
+      }
+    } catch (err: any) {
+      setCameraError(err?.message || 'Failed to switch camera device.');
+    } finally {
+      setCameraTesting(false);
+    }
   };
 
   const handleTestAudio = () => {
@@ -151,17 +193,19 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
     } catch {}
 
-    // Clean up preview stream so the vision pipeline can claim the webcam exclusively
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
+    // Detach preview element so the shared vision pipeline stream continues smoothly
+    if (videoPreviewRef.current) {
+      videoPreviewRef.current.srcObject = null;
     }
 
     onComplete();
   };
 
   return (
-    <div className="w-[450px] max-w-full mx-auto bg-slate-900/95 text-white border-2 border-emerald-400/80 rounded-3xl shadow-2xl p-6 backdrop-blur-xl flex flex-col justify-between select-none relative z-50">
+    <div 
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      className="w-[450px] max-w-full mx-auto bg-slate-900/95 text-white border-2 border-emerald-400/80 rounded-3xl shadow-2xl p-6 backdrop-blur-xl flex flex-col justify-between select-none relative z-50"
+    >
       {/* Top Header / Draggable App Titlebar */}
       <div 
         className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 select-none cursor-move"
@@ -257,32 +301,40 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
             )}
           </div>
 
-          {/* Camera Access Button or Dropdown */}
-          {!hasCameraPermission ? (
-            <button
-              onClick={() => requestCameraAccess()}
-              className="w-full py-2 px-3 rounded-xl font-semibold text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition active:scale-95 flex items-center justify-center gap-1.5"
-            >
-              <span>Enable Webcam Access</span>
-            </button>
-          ) : (
-            availableCameras.length > 1 && (
-              <div className="w-full text-left">
-                <label className="text-[11px] font-medium text-slate-400 mb-1 block">Choose Camera Device:</label>
-                <select
-                  value={selectedCameraId}
-                  onChange={handleCameraChange}
-                  className="w-full text-xs bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-emerald-400"
-                >
-                  {availableCameras.map((cam) => (
-                    <option key={cam.deviceId} value={cam.deviceId}>
-                      {cam.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )
-          )}
+          {/* Camera Source Selector (Powered by visionPipeline) */}
+          <div className="w-full text-left space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-medium text-slate-400">Camera Device:</label>
+              <button
+                type="button"
+                onClick={() => requestCameraAccess()}
+                className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold"
+              >
+                🔄 Refresh Cameras
+              </button>
+            </div>
+            {availableCameras.length > 0 ? (
+              <select
+                value={selectedCameraId}
+                onChange={handleCameraChange}
+                className="w-full text-xs bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 text-slate-200 focus:outline-none focus:border-emerald-400 shadow-inner"
+              >
+                {availableCameras.map((cam) => (
+                  <option key={cam.deviceId} value={cam.deviceId}>
+                    📷 {cam.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <button
+                type="button"
+                onClick={() => requestCameraAccess()}
+                className="w-full py-2 px-3 rounded-xl font-semibold text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                <span>Enable Webcam Access</span>
+              </button>
+            )}
+          </div>
 
           {cameraError && (
             <p className="text-[11px] text-rose-400 bg-rose-950/40 border border-rose-800/60 p-2 rounded-xl text-left">
