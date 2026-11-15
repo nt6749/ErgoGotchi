@@ -142,7 +142,13 @@ const awardsCorn = !electronAPI?.isElectron || isPetWindow;
 export const App: React.FC = () => {
   // Application view state
   const [showDashboard, setShowDashboard] = useState(isDashboardView);
-  const [isDemoMode, setIsDemoMode] = useState(true); // Default to Demo mode for sunhacks judging!
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.demoMode') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(() => {
     try {
       const saved = localStorage.getItem('ergogotchi.difficulty');
@@ -172,7 +178,7 @@ export const App: React.FC = () => {
   // Scoring and biometric state
   const [scoringState, setScoringState] = useState<ScoringState>(createInitialState());
   const [currentSignals, setCurrentSignals] = useState<BiometricSignals | null>(null);
-  const [isCalibrated, setIsCalibrated] = useState(false);
+  const [isCalibrated, setIsCalibrated] = useState(() => visionPipeline.isCalibrated);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibrationProgress, setCalibrationProgress] = useState(0);
   const [isPresent, setIsPresent] = useState(true);
@@ -287,14 +293,17 @@ export const App: React.FC = () => {
       setIsCalibrating(false);
     };
 
-    // Auto-start camera and run initial calibration
+    // Auto-start camera and run initial calibration if not already calibrated
     const initVision = async () => {
       await visionPipeline.initMediaPipe();
       await visionPipeline.startCamera();
       refreshCameras();
-      // Auto-start 5s calibration
-      setIsCalibrating(true);
-      visionPipeline.startCalibration();
+      if (!visionPipeline.isCalibrated) {
+        setIsCalibrating(true);
+        visionPipeline.startCalibration();
+      } else {
+        setIsCalibrated(true);
+      }
     };
 
     if (!visionStarted) {
@@ -576,7 +585,12 @@ export const App: React.FC = () => {
   const applyPresenter = (patch: Partial<PresenterState>) => {
     if ('forcedState' in patch) setForcedState(patch.forcedState ?? null);
     if (patch.forcedActivity) setForcedActivity(patch.forcedActivity);
-    if (typeof patch.demoMode === 'boolean') setIsDemoMode(patch.demoMode);
+    if (typeof patch.demoMode === 'boolean') {
+      setIsDemoMode(patch.demoMode);
+      try {
+        localStorage.setItem('ergogotchi.demoMode', String(patch.demoMode));
+      } catch {}
+    }
   };
   const setPresenter = (patch: Partial<PresenterState>) => {
     applyPresenter(patch);

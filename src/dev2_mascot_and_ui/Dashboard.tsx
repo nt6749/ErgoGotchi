@@ -315,12 +315,53 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [debriefSent, setDebriefSent] = useState(false);
   const [debriefStatus, setDebriefStatus] = useState<string | null>(null);
 
+  const [webhookUrlInput, setWebhookUrlInput] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ergogotchi.webhookUrl') || 'https://ntfy.sh/ergogotchi_sunhacks_2026';
+    } catch {
+      return 'https://ntfy.sh/ergogotchi_sunhacks_2026';
+    }
+  });
+  const [testWebhookStatus, setTestWebhookStatus] = useState<string | null>(null);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+
+  const handleSaveWebhook = (url: string) => {
+    setWebhookUrlInput(url);
+    try {
+      localStorage.setItem('ergogotchi.webhookUrl', url.trim());
+    } catch {}
+  };
+
+  const handleTestWebhookPing = async () => {
+    if (isTestingWebhook) return;
+    setIsTestingWebhook(true);
+    setTestWebhookStatus(null);
+    try {
+      const url = webhookUrlInput.trim();
+      const res = await fetch(`http://localhost:8000/grok-bot/webhook?session_id=test-ping&webhook_url=${encodeURIComponent(url)}`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.dispatched) {
+        setTestWebhookStatus(`✓ Test notification successfully dispatched to ${url}! Check your phone.`);
+      } else {
+        setTestWebhookStatus(`✗ Dispatch note: ${data.reason || data.detail || 'Check server connection or URL.'}`);
+      }
+    } catch {
+      setTestWebhookStatus('✗ Could not reach backend server on http://localhost:8000. Start backend first.');
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
   const handleSendDebrief = async () => {
     if (isSendingDebrief || debriefSent) return;
     setIsSendingDebrief(true);
     setDebriefStatus(null);
     try {
-      const res = await fetch(`http://localhost:8000/grok-bot/webhook?session_id=${encodeURIComponent(sessionId)}`, {
+      const customUrl = localStorage.getItem('ergogotchi.webhookUrl')?.trim() || webhookUrlInput?.trim();
+      const queryParam = customUrl ? `&webhook_url=${encodeURIComponent(customUrl)}` : '';
+      const res = await fetch(`http://localhost:8000/grok-bot/webhook?session_id=${encodeURIComponent(sessionId)}${queryParam}`, {
         method: 'POST',
       });
       const data = await res.json();
@@ -1115,6 +1156,61 @@ GROUP BY bucket, session_id;`}</pre>
                     className="accent-yellow-400 w-5 h-5 cursor-pointer ml-4"
                   />
                 </label>
+              </div>
+
+              {/* SpaceXSI Grok Bot & Mobile Notifications Card */}
+              <div className={`${CARD} p-5 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🚀</span>
+                    <div>
+                      <h3 className="font-bold text-base">SpaceXSI Grok Bot & Mobile Webhooks</h3>
+                      <p className={`text-xs ${MUTED}`}>Send end-of-session achievement medals and $0 desk fixes to your phone or Discord</p>
+                    </div>
+                  </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    ntfy.sh / Discord
+                  </span>
+                </div>
+
+                <div className={`${PANEL} p-4 rounded-xl space-y-3`}>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-[var(--ink)] block">
+                      Webhook Target URL
+                    </label>
+                    <p className={`text-[11px] ${MUTED}`}>
+                      Use free <strong>ntfy.sh</strong> (e.g. <code className="text-cyan-300">https://ntfy.sh/ergogotchi_sunhacks_2026</code>) for lock-screen mobile toasts, or a Discord/Slack webhook URL.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="url"
+                      value={webhookUrlInput}
+                      onChange={(e) => handleSaveWebhook(e.target.value)}
+                      placeholder="https://ntfy.sh/ergogotchi_sunhacks_2026"
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-cyan-400 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleTestWebhookPing}
+                      disabled={isTestingWebhook || !webhookUrlInput.trim()}
+                      className={`${BUTTON_PRIMARY} !bg-cyan-500 !text-slate-950 !border-cyan-400 font-bold whitespace-nowrap`}
+                    >
+                      {isTestingWebhook ? 'Sending...' : '⚡ Test Ping'}
+                    </button>
+                  </div>
+
+                  {testWebhookStatus && (
+                    <div className={`text-xs font-mono p-2.5 rounded-lg border ${
+                      testWebhookStatus.startsWith('✓')
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                        : 'bg-red-950/40 border-red-500/40 text-red-300'
+                    }`}>
+                      {testWebhookStatus}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Dev 1 Biometric Safeguards Overview */}

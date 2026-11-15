@@ -186,6 +186,14 @@ webhook_cooldowns: Dict[str, float] = {}
 @app.post("/grok-bot/webhook")
 async def dispatch_grok_bot(session_id: str, webhook_url: Optional[str] = None):
     """Trigger SpaceXSI Grok Bot daily/session digest dispatch with 10s flood guard."""
+    target_url = (webhook_url or settings.GROK_WEBHOOK_URL or "").strip()
+    if not target_url:
+        return {
+            "dispatched": False,
+            "session_id": session_id,
+            "reason": "No webhook URL configured. Add GROK_WEBHOOK_URL to .env or specify in Settings.",
+        }
+
     now = asyncio.get_running_loop().time()
     last_sent = webhook_cooldowns.get(session_id, 0.0)
     if (now - last_sent) < 10.0:
@@ -200,11 +208,16 @@ async def dispatch_grok_bot(session_id: str, webhook_url: Optional[str] = None):
         session_id=session_id,
         summary_text=summary_resp["summary"],
         stats=summary_resp["stats"],
-        webhook_url=webhook_url or settings.GROK_WEBHOOK_URL,
+        webhook_url=target_url,
     )
     if sent:
         webhook_cooldowns[session_id] = now
-    return {"dispatched": sent, "session_id": session_id}
+        return {"dispatched": True, "session_id": session_id, "url": target_url}
+    return {
+        "dispatched": False,
+        "session_id": session_id,
+        "reason": f"Dispatch to {target_url} failed or was blocked by security rules.",
+    }
 
 @app.websocket("/ws")
 async def websocket_telemetry(websocket: WebSocket, token: str = Query(default="")):

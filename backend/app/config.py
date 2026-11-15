@@ -1,10 +1,24 @@
 """Configuration settings for ErgoGotchi Backend Service."""
 
 import os
+from pathlib import Path
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-load_dotenv()
+# Search current directory, parent directories, and repo root for .env
+root_dir = Path(__file__).resolve().parent.parent.parent
+env_paths = [
+    Path.cwd() / ".env",
+    root_dir / ".env",
+    root_dir / "backend" / ".env",
+]
+loaded_env = False
+for p in env_paths:
+    if p.is_file():
+        load_dotenv(dotenv_path=p, override=False)
+        loaded_env = True
+if not loaded_env:
+    load_dotenv()
 
 def _get_int(key: str, default: int) -> int:
     val = os.getenv(key, "")

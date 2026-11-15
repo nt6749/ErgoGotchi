@@ -74,6 +74,15 @@ export class VisionPipeline {
   private blinkTrackingStartedAt: number = Date.now();
   private eyeClosedStartTime: number | null = null;
 
+  // Persistent tracking of last-seen pose & face metrics so 40ms interval doesn't flicker back to defaults
+  private lastKnownW: number = 0.35;
+  private lastKnownF: number = 0.12;
+  private lastKnownD: number = 0.20;
+  private lastKnownT: number = 0.0;
+  private lastKnownPitch: number = 0.0;
+  private lastKnownYaw: number = 0.0;
+  private hasSeenPose: boolean = false;
+
   // Smoothing buffers (1-second median smoothing)
   private signalBuffer: BiometricSignals[] = [];
   private lastForwardHead: number = 0.0;
@@ -85,6 +94,21 @@ export class VisionPipeline {
 
   constructor() {
     this.createHiddenVideoElement();
+    try {
+      const saved = localStorage.getItem('ergogotchi.baseline');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.w0 === 'number' && typeof parsed.f0 === 'number') {
+          this.baseline = parsed;
+          this.isCalibrated = true;
+          this.lastKnownW = parsed.w0;
+          this.lastKnownF = parsed.f0;
+          this.lastKnownD = parsed.d0;
+          this.lastKnownT = parsed.t0;
+          this.lastKnownPitch = parsed.p0;
+        }
+      }
+    } catch {}
   }
 
   private createHiddenVideoElement() {
@@ -313,6 +337,10 @@ export class VisionPipeline {
       calibratedAt: new Date().toISOString(),
     };
 
+    try {
+      localStorage.setItem('ergogotchi.baseline', JSON.stringify(this.baseline));
+    } catch {}
+
     this.isCalibrated = true;
     // New blink threshold -> restart the blink-rate window
     this.blinkTimestamps = [];
@@ -333,12 +361,12 @@ export class VisionPipeline {
 
       const now = performance.now();
       let isPresent = false;
-      let rawW = this.baseline.w0;
-      let rawF = this.baseline.f0;
-      let rawD = this.baseline.d0;
-      let rawT = this.baseline.t0;
-      let rawPitch = this.baseline.p0;
-      let rawYaw = 0;
+      let rawW = this.lastKnownW;
+      let rawF = this.lastKnownF;
+      let rawD = this.lastKnownD;
+      let rawT = this.lastKnownT;
+      let rawPitch = this.lastKnownPitch;
+      let rawYaw = this.lastKnownYaw;
       let blinkScore = 0.05;
 
       try {
@@ -354,6 +382,7 @@ export class VisionPipeline {
             const pRight = facePoints[454];
             if (pLeft && pRight) {
               rawF = Math.hypot(pRight.x - pLeft.x, pRight.y - pLeft.y);
+              this.lastKnownF = rawF;
             }
 
             // Extract Blink blendshapes
@@ -370,6 +399,8 @@ export class VisionPipeline {
               // Pitch (rotation around X) and Yaw (rotation around Y)
               rawPitch = Math.atan2(m[6], m[10]) * (180 / Math.PI);
               rawYaw = Math.atan2(-m[2], Math.sqrt(m[6] * m[6] + m[10] * m[10])) * (180 / Math.PI);
+              this.lastKnownPitch = rawPitch;
+              this.lastKnownYaw = rawYaw;
             }
           }
         }
@@ -388,11 +419,15 @@ export class VisionPipeline {
             if (leftShoulder && rightShoulder && leftShoulder.visibility > 0.5 && rightShoulder.visibility > 0.5) {
               rawW = Math.hypot(rightShoulder.x - leftShoulder.x, rightShoulder.y - leftShoulder.y);
               rawT = Math.atan2(rightShoulder.y - leftShoulder.y, rightShoulder.x - leftShoulder.x) * (180 / Math.PI);
+              this.lastKnownW = rawW;
+              this.lastKnownT = rawT;
+              this.hasSeenPose = true;
 
               if (leftEar && rightEar) {
                 const earMidY = (leftEar.y + rightEar.y) / 2;
                 const shoulderMidY = (leftShoulder.y + rightShoulder.y) / 2;
                 rawD = Math.max(0.01, shoulderMidY - earMidY);
+                this.lastKnownD = rawD;
               }
             }
           }
