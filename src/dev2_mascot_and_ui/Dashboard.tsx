@@ -1,11 +1,54 @@
 /**
  * ErgoGotchi Companion Dashboard.
- * Displays real-time Tiger Data continuous aggregates, strain velocity,
- * biomechanical stretch guides, and Google Gemini coaching history.
+ *
+ * Layout, top to bottom: a header bar of buttons, a bar of tabs, then the tab (the live stats sit
+ * at the top of the Telemetry and Demo tabs). Light and dark mode come from theme.ts.
  */
 
 import React, { useState, useEffect } from 'react';
-import { PetState, StretchCue } from '../types';
+import { PetState } from '../types';
+import { NEW_EVENTS, NEW_JOURNAL, type Events, type Journal } from './journal';
+import { MyDuck } from './MyDuck';
+import type { ForcedActivity } from './PixelMascot';
+import {
+  ADULT_LEVEL,
+  canFeed,
+  cornInterval,
+  cornNeeded,
+  grantCorn,
+  HATCH_LEVEL,
+  NEW_PET,
+  setLevel,
+  STAGE_TITLES,
+  stageOf,
+  startOver,
+  type PetProfile,
+} from './progression';
+import { QuestsTab } from './QuestsTab';
+import {
+  BAD_TEXT,
+  BAR_ACCENT,
+  BAR_BAD,
+  BAR_GOOD,
+  BUTTON_NEUTRAL,
+  BUTTON_OUTLINE,
+  BUTTON_PRIMARY,
+  BUTTON_SELECTED,
+  CALLOUT,
+  CARD,
+  FAINT,
+  GOOD_TEXT,
+  LABEL,
+  MUTED,
+  PANEL,
+  TRACK,
+  type ThemeMode,
+} from './theme';
+
+interface CameraChoice {
+  deviceId: string;
+  label: string;
+}
 
 interface DashboardProps {
   hp: number;
@@ -15,9 +58,76 @@ interface DashboardProps {
   worstSignal: string;
   isDemoMode: boolean;
   onToggleDemoMode: () => void;
-  onForceState: (state: PetState) => void;
+  /** Force a pet state for demos, or null to follow the camera again. */
+  onForceState: (state: PetState | null) => void;
   onRecalibrate: () => void;
   sessionId: string;
+  /** The pet's profile: name, level, corn and clothes. */
+  pet?: PetProfile;
+  /** Apply a change to the stored pet profile (rename, buy, wear). */
+  onPetChange?: (change: (pet: PetProfile) => PetProfile) => void;
+  /** Feed the pet; true if it ate. */
+  onFeed?: () => boolean;
+
+  // Button bar
+  isConnected?: boolean;
+  cameras?: CameraChoice[];
+  activeCameraId?: string | null;
+  onSelectCamera?: (deviceId: string) => void;
+  /** Shown as a "Back to desktop" button when provided (browser view only). */
+  onHide?: () => void;
+
+  // Presenter controls
+  /** The pet state currently being forced, or null when following the camera. */
+  forcedState?: PetState | null;
+  forcedActivity?: ForcedActivity;
+  onForceActivity?: (value: ForcedActivity) => void;
+  /** Show the posture-warning emote (knife / tantrum / angry egg). */
+  onShowWarning?: () => void;
+
+  // Quests tab
+  journal?: Journal;
+  events?: Events;
+  onEventsChange?: (change: (events: Events) => Events) => void;
+
+  // Light / dark mode
+  theme?: ThemeMode;
+  onToggleTheme?: () => void;
+}
+
+type TabId = 'analytics' | 'myduck' | 'quests' | 'tigerdata' | 'demo';
+const TABS: Array<{ id: TabId; icon: string; label: string }> = [
+  { id: 'analytics', icon: '📊', label: 'Telemetry' },
+  { id: 'myduck', icon: '🦆', label: 'My DuckDuck' },
+  { id: 'quests', icon: '🎯', label: 'Quests' },
+  { id: 'tigerdata', icon: '🐅', label: 'Tiger Data' },
+  { id: 'demo', icon: '🎬', label: 'Demo' },
+];
+
+/** A row of choices where the current one is shown as "on". */
+function ChoiceRow<T extends string | null>({
+  choices,
+  current,
+  onPick,
+}: {
+  choices: Array<{ value: T; label: string }>;
+  current: T;
+  onPick: (value: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {choices.map((c) => (
+        <button
+          key={String(c.value)}
+          onClick={() => onPick(c.value)}
+          aria-pressed={c.value === current}
+          className={c.value === current ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -31,8 +141,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onForceState,
   onRecalibrate,
   sessionId,
+  pet = NEW_PET,
+  onPetChange = () => {},
+  onFeed = () => false,
+  isConnected = false,
+  cameras = [],
+  activeCameraId = null,
+  onSelectCamera,
+  onHide,
+  forcedState = null,
+  forcedActivity = 'AUTO',
+  onForceActivity = () => {},
+  onShowWarning = () => {},
+  journal = NEW_JOURNAL,
+  events = NEW_EVENTS,
+  onEventsChange = () => {},
+  theme = 'dark',
+  onToggleTheme,
 }) => {
-  const [activeTab, setActiveTab] = useState<'analytics' | 'stretches' | 'tigerdata' | 'simulator'>('analytics');
+  const [activeTab, setActiveTab] = useState<TabId>('analytics');
   const [seriesData, setSeriesData] = useState<any[]>([]);
   const [sessionSummary, setSessionSummary] = useState<string>('Analyzing your focus session...');
   const [tigerStats, setTigerStats] = useState<any>(null);
@@ -70,270 +197,254 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => clearInterval(interval);
   }, [sessionId]);
 
+  const stage = stageOf(pet);
+  const need = cornNeeded(pet);
+  const enoughCorn = canFeed(pet);
+  const hpBar = hp >= 80 ? BAR_GOOD : hp >= 40 ? BAR_ACCENT : BAR_BAD;
+  const blinkOk = blinkRate >= 10;
+  // Live stats matter on the tabs about the current session; the others have their own headers
+  const showStats = activeTab === 'analytics' || activeTab === 'demo';
+
   return (
-    <div className="w-full max-w-5xl mx-auto bg-slate-950 text-slate-100 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col my-4">
-      {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between px-6 py-4 bg-slate-900/90 border-b border-slate-800 gap-4">
+    <div className="w-full h-full flex flex-col">
+      {/* Bar 1: buttons */}
+      <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 bg-[var(--surface)] border-b border-[var(--line)]">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center font-black text-slate-950 shadow-md">
-            EG
-          </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-              ErgoGotchi Companion
-              <span className="text-xs font-mono font-normal px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                sunhacks 2026
-              </span>
-            </h1>
-            <p className="text-xs text-slate-400">Biometric Ergonomic Telemetry & Gemini Persona Engine</p>
+          <span className="w-10 h-10 rounded-xl bg-[var(--accent)] flex items-center justify-center text-xl">🦆</span>
+          <div className="leading-tight">
+            <h1 className="text-base font-bold tracking-tight">ErgoGotchi</h1>
+            <p className={`text-[11px] ${MUTED}`}>{pet.name}'s companion dashboard</p>
           </div>
         </div>
 
-        {/* Global Controls */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onToggleDemoMode}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
-              isDemoMode
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/10'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-            }`}
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`${BUTTON_NEUTRAL} flex items-center gap-2 cursor-default hover:!border-[var(--line)]`}
+            title={isConnected ? 'Connected to the telemetry server' : 'Server offline: using built-in lines'}
           >
-            {isDemoMode ? '⚡ Demo Mode: ON (1.5s Dwell)' : 'Normal Mode'}
-          </button>
+            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[var(--good)]' : 'bg-[var(--warn)]'}`} />
+            {isConnected ? 'Live' : 'Offline'}
+          </span>
 
-          <button
-            onClick={onRecalibrate}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition-all shadow"
-          >
-            Calibrate Posture
+          {onSelectCamera && (
+            <select
+              value={activeCameraId ?? ''}
+              onChange={(e) => onSelectCamera(e.target.value)}
+              title="Camera used for posture tracking"
+              className={`${BUTTON_NEUTRAL} max-w-[170px]`}
+            >
+              {!activeCameraId && <option value="">📷 No camera</option>}
+              {cameras.map((cam) => (
+                <option key={cam.deviceId} value={cam.deviceId}>
+                  📷 {cam.label}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <button onClick={onToggleDemoMode} aria-pressed={isDemoMode} className={isDemoMode ? BUTTON_SELECTED : BUTTON_NEUTRAL}>
+            ⚡ Demo mode: {isDemoMode ? 'on' : 'off'}
           </button>
+          <button onClick={onRecalibrate} className={BUTTON_OUTLINE}>
+            Calibrate
+          </button>
+          {onToggleTheme && (
+            <button
+              onClick={onToggleTheme}
+              className={BUTTON_NEUTRAL}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+            </button>
+          )}
+          {onHide && (
+            <button onClick={onHide} className={BUTTON_NEUTRAL}>
+              Back to desktop
+            </button>
+          )}
         </div>
-      </div>
+      </header>
 
-      {/* Navigation Tabs */}
-      <div className="flex border-b border-slate-800 bg-slate-900/40 px-6">
-        {[
-          { id: 'analytics', label: '📊 Telemetry & Fatigue' },
-          { id: 'stretches', label: '🧘 Biomechanical Stretches' },
-          { id: 'tigerdata', label: '🐅 Tiger Data TimescaleDB' },
-          { id: 'simulator', label: '🎮 Presenter Hotkeys' },
-        ].map((tab) => (
+      {/* Bar 2: tabs */}
+      <nav className="flex flex-wrap px-4 bg-[var(--surface)] border-b border-[var(--line)]">
+        {TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`px-4 py-3 text-xs font-semibold transition-all border-b-2 ${
+            onClick={() => setActiveTab(tab.id)}
+            aria-pressed={activeTab === tab.id}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 -mb-px transition-colors ${
               activeTab === tab.id
-                ? 'border-emerald-400 text-emerald-400 bg-slate-800/40'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-[var(--accent)] text-[var(--accent)]'
+                : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)]'
             }`}
           >
+            <span>{tab.icon}</span>
             {tab.label}
           </button>
         ))}
-      </div>
+      </nav>
 
-      {/* Content Area */}
-      <div className="p-6 overflow-y-auto max-h-[70vh]">
-        {/* Real-Time Live Status Strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-slate-900/70 p-4 rounded-2xl border border-slate-800 shadow">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Mascot HP</span>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-black text-white">{Math.round(hp)}%</span>
-              <span className={`text-xs font-bold ${hp >= 80 ? 'text-emerald-400' : hp >= 40 ? 'text-amber-400' : 'text-rose-400'}`}>
-                {state}
-              </span>
-            </div>
-            <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
-              <div
-                className={`h-full transition-all duration-500 ${
-                  hp >= 80 ? 'bg-emerald-400' : hp >= 40 ? 'bg-amber-400' : 'bg-rose-500'
-                }`}
-                style={{ width: `${Math.max(4, hp)}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="bg-slate-900/70 p-4 rounded-2xl border border-slate-800 shadow">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Strain Index</span>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-black text-white">{(strainIndex * 100).toFixed(0)}%</span>
-              <span className="text-xs text-slate-400">worst: {worstSignal.replace('_', ' ')}</span>
-            </div>
-            <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
-              <div
-                className="h-full bg-indigo-400 transition-all duration-300"
-                style={{ width: `${strainIndex * 100}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="bg-slate-900/70 p-4 rounded-2xl border border-slate-800 shadow">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Blink Rate</span>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-black text-white">{blinkRate}</span>
-              <span className="text-xs text-slate-400">blinks/min</span>
-            </div>
-            <p className="text-[10px] text-slate-500 mt-1">
-              {blinkRate >= 10 ? 'Healthy ocular hydration' : 'Optical fixation warning'}
-            </p>
-          </div>
-
-          <div className="bg-slate-900/70 p-4 rounded-2xl border border-slate-800 shadow">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Discipline Rank</span>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-xl font-black text-amber-300">Spine Guru</span>
-              <span className="text-xs text-emerald-400 font-bold">Lvl 4</span>
-            </div>
-            <p className="text-[10px] text-slate-500 mt-1">420 XP to Next Posture Tier</p>
-          </div>
-        </div>
-
-        {/* Tab 1: Telemetry & Fatigue Charts */}
-        {activeTab === 'analytics' && (
-          <div className="space-y-6">
-            {/* Gemini Session Summary Callout */}
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900 to-indigo-950/40 border border-emerald-500/20 shadow">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm">✨</span>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-300">
-                  Google Gemini Ergonomic Coach Brief
-                </h3>
-              </div>
-              <p className="text-xs text-slate-200 leading-relaxed italic">
-                "{sessionSummary}"
-              </p>
-            </div>
-
-            {/* Fatigue & Strain Velocity Curve */}
-            <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>📈</span> 30-Minute Strain Velocity Curve (Tiger Data 1-Min Buckets)
-                </h3>
-                <span className="text-[11px] text-slate-400 font-mono">Continuous Aggregate: ergo_1min</span>
-              </div>
-
-              {seriesData.length > 0 ? (
-                <div className="h-48 w-full flex items-end gap-1.5 pt-4 pb-2 border-b border-slate-800">
-                  {seriesData.map((d, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group relative">
-                      {/* Tooltip */}
-                      <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col bg-slate-950 text-[10px] text-slate-200 p-2 rounded border border-slate-700 whitespace-nowrap z-30 shadow-xl">
-                        <span>Time: {new Date(d.bucket).toLocaleTimeString()}</span>
-                        <span>Strain: {(d.avg_strain * 100).toFixed(0)}%</span>
-                        <span>Velocity: {d.strain_velocity > 0 ? `+${d.strain_velocity}` : d.strain_velocity}</span>
-                      </div>
-                      <div
-                        className="w-full rounded-t transition-all duration-300 hover:brightness-125"
-                        style={{
-                          height: `${Math.max(8, d.avg_strain * 100)}%`,
-                          backgroundColor:
-                            d.avg_strain >= 0.5 ? '#f43f5e' : d.avg_strain >= 0.3 ? '#f59e0b' : '#10b981',
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="h-48 flex flex-col items-center justify-center text-slate-500 border border-dashed border-slate-800 rounded-xl">
-                  <p className="text-xs font-medium">Accumulating 1-minute time series data...</p>
-                  <p className="text-[11px] text-slate-600 mt-1">Sit upright or slouch to see live continuous aggregates.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Tab 2: Biomechanical Stretches */}
-        {activeTab === 'stretches' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[
-              {
-                cue: 'CHIN_TUCK',
-                title: 'Cervical Retraction (Chin Tuck)',
-                trigger: 'Forward Head Posture (Turtle Neck)',
-                desc: 'Pull your head straight back horizontally as if making a double chin. Hold 5 seconds. Repeat 3 times.',
-                benefit: 'Re-aligns C1-C7 vertebrae and relieves occipital tendon strain.',
-              },
-              {
-                cue: 'SHOULDER_ROLL',
-                title: 'Thoracic Scapular Retraction',
-                trigger: 'Hunched Shoulders & Slumping',
-                desc: 'Roll both shoulders up toward your ears, then sweep them back and down. Squeeze your shoulder blades.',
-                benefit: 'Releases trapezius tension and expands the rib cage.',
-              },
-              {
-                cue: 'SIT_BACK',
-                title: 'Pelvic Neutral Alignment',
-                trigger: 'Screen Creep & Hip Sliding',
-                desc: 'Slide your hips firmly to the back of the seat. Support your lumbar curve against the chair backrest.',
-                benefit: 'Prevents lumbar disc compression and spinal lordosis.',
-              },
-              {
-                cue: 'LOOK_AWAY',
-                title: '20-20-20 Ocular Reset',
-                trigger: 'Low Blink Rate & Optical Fixation',
-                desc: 'Look away from your screen at an object at least 20 feet away for 20 seconds.',
-                benefit: 'Relaxes ciliary eye muscles and stimulates tear film lubrication.',
-              },
-            ].map((stretch) => (
-              <div key={stretch.cue} className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                    {stretch.cue}
-                  </span>
-                  <span className="text-[11px] text-slate-400">Trigger: {stretch.trigger}</span>
-                </div>
-                <h4 className="text-sm font-bold text-white">{stretch.title}</h4>
-                <p className="text-xs text-slate-300 leading-relaxed">{stretch.desc}</p>
-                <div className="pt-2 text-[11px] text-emerald-400 font-medium">✓ {stretch.benefit}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Tab 3: Tiger Data (TimescaleDB) Showcase */}
-        {activeTab === 'tigerdata' && (
-          <div className="space-y-6">
-            <div className="p-5 bg-slate-900/80 rounded-2xl border border-slate-800">
-              <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                <span>🐅</span> Tiger Data / TimescaleDB Hypertable Architecture
-              </h3>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                ErgoGotchi ingests continuous 1 Hz biometric telemetry frames into a PostgreSQL hypertable partitioned
-                into 1-hour temporal chunks. Continuous aggregates maintain 1-minute real-time rolling summaries with
-                automatic 90%+ compression policies on historical data.
-              </p>
-            </div>
-
+      {/* Tab content */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="max-w-6xl mx-auto p-5 space-y-4">
+          {/* Live stats */}
+          {showStats && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">Engine</span>
-                <p className="text-sm font-bold text-emerald-400 mt-1">
-                  {tigerStats?.storage_engine || 'TimescaleDB (Tiger Data)'}
+              <div className={`${CARD} p-5`}>
+                <span className={LABEL}>Duck HP</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-bold">{Math.round(hp)}%</span>
+                  <span className={`text-sm capitalize ${MUTED}`}>{state.toLowerCase()}</span>
+                </div>
+                <div className={`${TRACK} h-1.5 mt-3`}>
+                  <div className={`h-full transition-all duration-500 ${hpBar}`} style={{ width: `${Math.max(3, hp)}%` }} />
+                </div>
+              </div>
+
+              <div className={`${CARD} p-5`}>
+                <span className={LABEL}>Strain</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-bold">{(strainIndex * 100).toFixed(0)}%</span>
+                  <span className={`text-sm truncate ${MUTED}`}>worst: {worstSignal.replace('_', ' ')}</span>
+                </div>
+                <div className={`${TRACK} h-1.5 mt-3`}>
+                  <div
+                    className={`h-full transition-all duration-300 ${strainIndex >= 0.5 ? BAR_BAD : BAR_ACCENT}`}
+                    style={{ width: `${strainIndex * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className={`${CARD} p-5`}>
+                <span className={LABEL}>Blink rate</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-3xl font-bold">{blinkRate}</span>
+                  <span className={`text-sm ${MUTED}`}>blinks/min</span>
+                </div>
+                <p className={`text-xs font-semibold mt-2 ${blinkOk ? GOOD_TEXT : BAD_TEXT}`}>
+                  {blinkOk ? 'Eyes are fine' : 'Staring too hard'}
                 </p>
+                <div className={`${TRACK} h-1.5 mt-2`}>
+                  <div
+                    className={`h-full transition-all duration-300 ${blinkOk ? BAR_GOOD : BAR_BAD}`}
+                    style={{ width: `${Math.min(1, blinkRate / 20) * 100}%` }}
+                  />
+                </div>
               </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">Total Telemetry Rows</span>
-                <p className="text-sm font-bold text-white mt-1">
-                  {tigerStats?.telemetry_rows ? tigerStats.telemetry_rows.toLocaleString() : '86,400+ / day'}
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">Aggregate View</span>
-                <p className="text-sm font-bold text-cyan-400 mt-1">ergo_1min (Continuous)</p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">Compression</span>
-                <p className="text-sm font-bold text-amber-400 mt-1">Segmented by session_id</p>
+
+              <div className={`${CARD} p-5`}>
+                <span className={LABEL}>{STAGE_TITLES[stage]}</span>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className={`text-xs ${MUTED}`}>Lv</span>
+                  <span className="text-3xl font-bold">{pet.level}</span>
+                  <span className={`text-sm font-semibold ${enoughCorn ? GOOD_TEXT : BAD_TEXT}`}>
+                    {pet.corn}/{need} 🌽
+                  </span>
+                </div>
+                <div className={`${TRACK} h-1.5 mt-3`}>
+                  <div
+                    className={`h-full transition-all duration-300 ${enoughCorn ? BAR_GOOD : BAR_ACCENT}`}
+                    style={{ width: `${Math.min(1, pet.corn / need) * 100}%` }}
+                  />
+                </div>
               </div>
             </div>
+          )}
 
-            <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 font-mono text-[11px] text-slate-300 overflow-x-auto">
-              <p className="text-emerald-400 font-bold mb-1">-- Real-time Continuous Aggregate Definition:</p>
-              <pre>{`CREATE MATERIALIZED VIEW ergo_1min
+          {/* Telemetry & fatigue charts */}
+          {activeTab === 'analytics' && (
+            <>
+              <div className={`${CALLOUT} px-5 py-4`}>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-1.5">
+                  ✨ Google Gemini coach brief
+                </h3>
+                <p className={`text-sm italic ${MUTED}`}>"{sessionSummary}"</p>
+              </div>
+
+              <div className={`${CARD} p-5`}>
+                <div className="flex flex-wrap justify-between items-baseline gap-2 mb-4">
+                  <h3 className="text-sm font-bold">
+                    📈 30-minute strain curve <span className={`font-normal text-xs ${MUTED}`}>Tiger Data 1-min buckets</span>
+                  </h3>
+                  <span className={`text-[11px] font-mono ${FAINT}`}>Continuous aggregate: ergo_1min</span>
+                </div>
+
+                {seriesData.length > 0 ? (
+                  <div className="h-48 w-full flex items-end gap-1.5 pt-4 border-b border-[var(--line)]">
+                    {seriesData.map((d, i) => (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group relative">
+                        <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col bg-[var(--ink)] text-[var(--bg)] text-[10px] p-2 rounded-lg whitespace-nowrap z-30">
+                          <span>Time: {new Date(d.bucket).toLocaleTimeString()}</span>
+                          <span>Strain: {(d.avg_strain * 100).toFixed(0)}%</span>
+                          <span>Velocity: {d.strain_velocity > 0 ? `+${d.strain_velocity}` : d.strain_velocity}</span>
+                        </div>
+                        <div
+                          className={`w-full rounded-t transition-all duration-300 hover:brightness-110 ${
+                            d.avg_strain >= 0.5 ? BAR_BAD : d.avg_strain >= 0.3 ? BAR_ACCENT : BAR_GOOD
+                          }`}
+                          style={{ height: `${Math.max(8, d.avg_strain * 100)}%` }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className={`h-48 flex flex-col items-center justify-center border border-dashed border-[var(--line)] rounded-xl ${MUTED}`}>
+                    <p className="text-sm">Collecting 1-minute data…</p>
+                    <p className={`text-xs mt-1 ${FAINT}`}>Sit upright or slouch to see the live aggregates.</p>
+                  </div>
+                )}
+                <div className={`flex justify-between text-[11px] mt-2 ${FAINT}`}>
+                  <span>30 min ago</span>
+                  <span>15 min ago</span>
+                  <span>Now</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* My DuckDuck: profile + wardrobe */}
+          {activeTab === 'myduck' && (
+            <MyDuck pet={pet} onPetChange={onPetChange} onFeed={onFeed} cornEverySeconds={cornInterval(isDemoMode)} />
+          )}
+
+          {/* Quests: daily quests, games, achievements, session report, stretches */}
+          {activeTab === 'quests' && (
+            <QuestsTab pet={pet} journal={journal} events={events} onPetChange={onPetChange} onEventsChange={onEventsChange} />
+          )}
+
+          {/* Tiger Data (TimescaleDB) showcase */}
+          {activeTab === 'tigerdata' && (
+            <>
+              <div className={`${CARD} p-5`}>
+                <h3 className="text-sm font-bold mb-2">🐅 Tiger Data / TimescaleDB hypertable architecture</h3>
+                <p className={`text-sm leading-relaxed ${MUTED}`}>
+                  ErgoGotchi ingests continuous 1 Hz biometric telemetry frames into a PostgreSQL hypertable partitioned
+                  into 1-hour temporal chunks. Continuous aggregates maintain 1-minute real-time rolling summaries with
+                  automatic 90%+ compression policies on historical data.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  ['Engine', tigerStats?.storage_engine || 'TimescaleDB (Tiger Data)'],
+                  [
+                    'Total telemetry rows',
+                    tigerStats?.telemetry_rows ? tigerStats.telemetry_rows.toLocaleString() : '86,400+ / day',
+                  ],
+                  ['Aggregate view', 'ergo_1min (continuous)'],
+                  ['Compression', 'Segmented by session_id'],
+                ].map(([label, value]) => (
+                  <div key={label} className={`${CARD} p-4`}>
+                    <span className={LABEL}>{label}</span>
+                    <p className="text-sm font-bold mt-1">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className={`${CARD} p-5 font-mono text-[11px] overflow-x-auto select-text`}>
+                <p className="text-[var(--accent)] font-bold mb-1">-- Real-time continuous aggregate definition:</p>
+                <pre className={MUTED}>{`CREATE MATERIALIZED VIEW ergo_1min
 WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
 SELECT
   time_bucket('1 minute', recorded_at) AS bucket,
@@ -347,49 +458,137 @@ SELECT
 FROM ergo_telemetry
 WHERE present
 GROUP BY bucket, session_id;`}</pre>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 4: Presenter Hotkeys */}
-        {activeTab === 'simulator' && (
-          <div className="space-y-5">
-            <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
-              <h3 className="text-sm font-bold text-white mb-2">⚡ 3-Minute Hackathon Demo Script Controller</h3>
-              <p className="text-xs text-slate-300 leading-relaxed mb-4">
-                Use these hotkeys or buttons during judging if venue lighting interferes with the webcam, or to demonstrate
-                instant transitions to the judges!
-              </p>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <button
-                  onClick={() => onForceState('THRIVING')}
-                  className="p-3 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-300 font-bold text-xs"
-                >
-                  Force Thriving [1]
-                </button>
-                <button
-                  onClick={() => onForceState('SLOUCHING')}
-                  className="p-3 rounded-xl bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/40 text-amber-300 font-bold text-xs"
-                >
-                  Force Slouching [2]
-                </button>
-                <button
-                  onClick={() => onForceState('WILTED')}
-                  className="p-3 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/40 text-rose-300 font-bold text-xs"
-                >
-                  Force Wilted [3]
-                </button>
-                <button
-                  onClick={() => onForceState('NEUTRAL')}
-                  className="p-3 rounded-xl bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-200 font-bold text-xs"
-                >
-                  Reset Neutral [4]
-                </button>
               </div>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+
+          {/* Demo controls */}
+          {activeTab === 'demo' && (
+            <>
+              <div className={`${CALLOUT} px-5 py-4`}>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-1.5">🎬 Demo controls</h3>
+                <p className={`text-sm leading-relaxed ${MUTED}`}>
+                  Drive the duck by hand during a demo, e.g. when venue lighting confuses the webcam. Everything here
+                  acts on the duck on your desktop straight away. The key in brackets does the same thing while this
+                  window is focused.
+                </p>
+              </div>
+
+              <div className={`${CARD} p-5 space-y-5`}>
+                <div>
+                  <h4 className={`${LABEL} mb-2`}>Posture state</h4>
+                  <ChoiceRow<PetState | null>
+                    current={forcedState}
+                    onPick={onForceState}
+                    choices={[
+                      { value: null, label: 'Follow camera [4]' },
+                      { value: 'THRIVING', label: 'Thriving [1]' },
+                      { value: 'NEUTRAL', label: 'Neutral' },
+                      { value: 'SLOUCHING', label: 'Slouching [2]' },
+                      { value: 'WILTED', label: 'Wilted [3]' },
+                      { value: 'AWAY', label: 'Away' },
+                    ]}
+                  />
+                  <button onClick={onShowWarning} className={`${BUTTON_OUTLINE} mt-2`}>
+                    Show posture warning [5]
+                  </button>
+                </div>
+
+                <div>
+                  <h4 className={`${LABEL} mb-2`}>Activity</h4>
+                  <ChoiceRow<ForcedActivity>
+                    current={forcedActivity}
+                    onPick={onForceActivity}
+                    choices={[
+                      { value: 'AUTO', label: 'Follow my apps [9]' },
+                      { value: 'WATCHING', label: 'Watching TV [6]' },
+                      { value: 'MUSIC', label: 'Music [7]' },
+                      { value: 'WORKING', label: 'Working [8]' },
+                      { value: 'NONE', label: 'Nothing' },
+                    ]}
+                  />
+                </div>
+
+                <div>
+                  <h4 className={`${LABEL} mb-2`}>
+                    Age <span className="normal-case font-normal">· now level {pet.level}, {STAGE_TITLES[stage]}</span>
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => onPetChange((p) => setLevel(p, 1))}
+                      className={stage === 'EGG' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                    >
+                      Egg
+                    </button>
+                    <button
+                      onClick={() => onPetChange((p) => setLevel(p, HATCH_LEVEL))}
+                      className={stage === 'BABY' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                    >
+                      Baby duck
+                    </button>
+                    <button
+                      onClick={() => onPetChange((p) => setLevel(p, ADULT_LEVEL))}
+                      className={stage === 'ADULT' ? BUTTON_SELECTED : BUTTON_NEUTRAL}
+                    >
+                      Grown duck
+                    </button>
+                    <button onClick={() => onPetChange((p) => setLevel(p, p.level + 1))} className={BUTTON_OUTLINE}>
+                      Level up +1 []]
+                    </button>
+                    <button
+                      onClick={() => onPetChange((p) => setLevel(p, p.level - 1))}
+                      disabled={pet.level <= 1}
+                      className={BUTTON_OUTLINE}
+                    >
+                      Level down −1 [[]
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className={`${LABEL} mb-2`}>
+                    Corn <span className="normal-case font-normal">· {pet.corn} 🌽 in the pantry, next level costs {need}</span>
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => onPetChange((p) => grantCorn(p, 10))} className={BUTTON_NEUTRAL}>
+                      +10 corn [X]
+                    </button>
+                    <button onClick={() => onPetChange((p) => grantCorn(p, 100))} className={BUTTON_PRIMARY}>
+                      +100 corn [Z]
+                    </button>
+                    <button onClick={onFeed} disabled={!enoughCorn} className={BUTTON_NEUTRAL}>
+                      Feed [F]
+                    </button>
+                    <button onClick={() => onPetChange((p) => ({ ...p, corn: 0 }))} className={BUTTON_NEUTRAL}>
+                      Empty pantry
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className={`${LABEL} mb-2`}>Session</h4>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={onToggleDemoMode} aria-pressed={isDemoMode} className={isDemoMode ? BUTTON_SELECTED : BUTTON_NEUTRAL}>
+                      ⚡ Demo mode: {isDemoMode ? 'on' : 'off'} [D]
+                    </button>
+                    <button onClick={onRecalibrate} className={BUTTON_NEUTRAL}>
+                      Calibrate [C]
+                    </button>
+                    <button onClick={() => onPetChange(startOver)} className={BUTTON_NEUTRAL}>
+                      Start over as an egg [E]
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className={`${PANEL} px-4 py-3 text-xs leading-relaxed ${MUTED}`}>
+                Demo mode makes everything faster: the duck slouches after 1.5 seconds instead of 5, sitting upright
+                pays 1 corn every {cornInterval(true)} seconds instead of every {cornInterval(false)}, and time-based
+                quests fill up about 30 times quicker.
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

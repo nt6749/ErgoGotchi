@@ -20,7 +20,20 @@ import {
 import { visionPipeline, CAMERA_PREF_KEY, type CameraOption } from './dev1_sensing_and_scoring/visionPipeline';
 import { wsClient } from './net/websocketClient';
 import { MascotSprite } from './dev2_mascot_and_ui/MascotSprite';
-import type { PetEmote } from './dev2_mascot_and_ui/PixelMascot';
+import type { Activity, ForcedActivity, PetEmote } from './dev2_mascot_and_ui/PixelMascot';
+import {
+  cornInterval,
+  earnCorn,
+  earnsCorn,
+  feed,
+  grantCorn,
+  loadPet,
+  PET_STORAGE_KEY,
+  startOver,
+  updatePet,
+  setLevel,
+  type PetProfile,
+} from './dev2_mascot_and_ui/progression';
 import { OnboardingWizard, ONBOARDING_STORAGE_KEY } from './dev2_mascot_and_ui/OnboardingWizard';
 
 /** Posture warnings clear after this many consecutive seconds of good posture. */
@@ -32,6 +45,20 @@ const POSTURE_CUES: StretchCue[] = ['CHIN_TUCK', 'SHOULDER_ROLL', 'SIT_BACK'];
 /** How long the "don't duck with me" knife warning stays up (matches the speech bubble). */
 const KNIFE_EMOTE_MS = 8000;
 import { Dashboard } from './dev2_mascot_and_ui/Dashboard';
+import {
+  DEMO_TIME_MULTIPLIER,
+  EVENTS_STORAGE_KEY,
+  JOURNAL_STORAGE_KEY,
+  loadEvents,
+  loadJournal,
+  recordFeed,
+  tickJournal,
+  updateEvents,
+  updateJournal,
+  type Events,
+  type Journal,
+} from './dev2_mascot_and_ui/journal';
+import { BUTTON_NEUTRAL, BUTTON_PRIMARY, loadTheme, PAGE, saveTheme, type ThemeMode } from './dev2_mascot_and_ui/theme';
 
 interface ElectronAPI {
   isElectron: boolean;
@@ -43,10 +70,39 @@ interface ElectronAPI {
   onToggleDemoMode: (cb: () => void) => void;
   setCameraList: (cameras: CameraOption[], activeId: string | null) => void;
   onSelectCamera: (cb: (deviceId: string) => void) => void;
+  onActivity: (cb: (activity: Activity) => void) => void;
+  onForceActivity: (cb: (value: ForcedActivity) => void) => void;
+  onAddCorn: (cb: (amount: number) => void) => void;
+  onResetGrowth: (cb: () => void) => void;
   onOpenWizard?: (cb: () => void) => void;
   centerPet?: (width?: number, height?: number) => void;
   dockPet?: () => void;
 }
+
+/**
+ * Presenter controls are shared between the pet window and the dashboard window, so a button
+ * pressed in the dashboard acts on the duck on the desktop. Each window keeps its own copy and
+ * broadcasts changes to the other over this channel.
+ */
+interface PresenterState {
+  forcedState: PetState | null;
+  forcedActivity: ForcedActivity;
+  demoMode: boolean;
+}
+type PresenterMessage =
+  | { type: 'set'; patch: Partial<PresenterState> }
+  | { type: 'hello' }
+  | { type: 'recalibrate' }
+  | { type: 'warning' };
+const presenterChannel: BroadcastChannel | null =
+  typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('ergogotchi-presenter');
+
+const FORCED_ACTIVITY: Record<Exclude<ForcedActivity, 'AUTO'>, Activity> = {
+  WATCHING: { scene: 'WATCHING', music: false },
+  MUSIC: { scene: 'IDLE', music: true },
+  WORKING: { scene: 'WORKING', music: false },
+  NONE: { scene: 'IDLE', music: false },
+};
 
 const electronAPI: ElectronAPI | undefined = (window as any).electronAPI;
 const isDashboardView = new URLSearchParams(window.location.search).get('view') === 'dashboard';
@@ -56,6 +112,12 @@ const isPetWindow = !!electronAPI?.isElectron && !isDashboardView;
 // React StrictMode runs effects twice in dev; the camera must only be opened once
 let visionStarted = false;
 let cameraSwitchInFlight = false;
+// Electron menu listeners must be attached once, or "Give 10 corn" would be applied twice in dev
+let growthMenuBound = false;
+
+// Only one window hands out corn, so the pet and dashboard windows don't both count the same second.
+// In Electron that is the pet window; in a plain browser tab it is the page itself.
+const awardsCorn = !electronAPI?.isElectron || isPetWindow;
 
 export const App: React.FC = () => {
   // Application view state
@@ -82,6 +144,44 @@ export const App: React.FC = () => {
   // Camera picker state
   const [cameras, setCameras] = useState<CameraOption[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
+
+  // The pet's profile (name, level, corn, clothes), kept in localStorage and shared between windows
+  const [pet, setPet] = useState<PetProfile>(() => loadPet());
+  const changePet = (change: (pet: PetProfile) => PetProfile) => setPet(updatePet(change));
+  // Seconds of upright sitting counted towards the next corn
+  const uprightSecondsRef = useRef(0);
+  // Posture journal (time counters) and events (things the user did): quests, achievements, report
+  const [journal, setJournal] = useState<Journal>(() => loadJournal());
+  const [events, setEvents] = useState<Events>(() => loadEvents());
+  const changeEvents = (change: (events: Events) => Events) => setEvents(updateEvents(change));
+
+  // Dashboard light / dark mode
+  const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
+  const toggleTheme = () =>
+    setTheme((mode) => {
+      const next: ThemeMode = mode === 'dark' ? 'light' : 'dark';
+      saveTheme(next);
+      return next;
+    });
+
+  /** Feed the pet the corn it needs to level up. Returns false if there isn't enough corn. */
+  const handleFeed = (): boolean => {
+    let fed = false;
+    changePet((p) => {
+      const next = feed(p);
+      fed = next !== p;
+      return next;
+    });
+    if (fed) changeEvents((e) => recordFeed(e));
+    return fed;
+  };
+
+  // What the user is doing on the computer, detected by the Electron shell (or forced for demos)
+  const [detectedActivity, setDetectedActivity] = useState<Activity>({ scene: 'IDLE', music: false });
+  const [forcedActivity, setForcedActivity] = useState<ForcedActivity>('AUTO');
+  const activity = forcedActivity === 'AUTO' ? detectedActivity : FORCED_ACTIVITY[forcedActivity];
+  const forcedActivityRef = useRef(forcedActivity);
+  forcedActivityRef.current = forcedActivity;
 
   // Speech bubble state
   const [speechText, setSpeechText] = useState<string | null>(null);
@@ -246,11 +346,33 @@ export const App: React.FC = () => {
       if (forcedStateRef.current) {
         next.state = forcedStateRef.current;
         if (forcedStateRef.current === 'THRIVING') next.hp = 95;
+        if (forcedStateRef.current === 'NEUTRAL') next.hp = 75;
         if (forcedStateRef.current === 'SLOUCHING') next.hp = 45;
         if (forcedStateRef.current === 'WILTED') next.hp = 15;
       }
 
       setScoringState(next);
+
+      // Sitting upright earns corn: one for every stretch of good posture
+      if (awardsCorn) {
+        let cornEarned = 0;
+        if (earnsCorn(next.state)) {
+          uprightSecondsRef.current += 1;
+          if (uprightSecondsRef.current >= cornInterval(isDemoModeRef.current)) {
+            uprightSecondsRef.current = 0;
+            cornEarned = 1;
+            changePet((p) => earnCorn(p, 1));
+          }
+        }
+        // ...and is written into the journal behind the quests, achievements and session report
+        const tick = {
+          state: next.state,
+          blinkRate: currentSignals?.blink_rate_1m ?? 0,
+          seconds: isDemoModeRef.current ? DEMO_TIME_MULTIPLIER : 1,
+          cornEarned,
+        };
+        setJournal(updateJournal((j) => tickJournal(j, tick)));
+      }
 
       // Clear posture warnings (bubble + knife) shortly after the user sits up
       const goodPosture = next.state !== 'CALIBRATING' && next.strainIndex < GOOD_POSTURE_STRAIN;
@@ -300,31 +422,80 @@ export const App: React.FC = () => {
     return () => clearInterval(loopInterval);
   }, []);
 
+  // Presenter controls: apply here and tell the other window
+  const applyPresenter = (patch: Partial<PresenterState>) => {
+    if ('forcedState' in patch) setForcedState(patch.forcedState ?? null);
+    if (patch.forcedActivity) setForcedActivity(patch.forcedActivity);
+    if (typeof patch.demoMode === 'boolean') setIsDemoMode(patch.demoMode);
+  };
+  const setPresenter = (patch: Partial<PresenterState>) => {
+    applyPresenter(patch);
+    presenterChannel?.postMessage({ type: 'set', patch } satisfies PresenterMessage);
+  };
+  const forceState = (s: PetState | null) => setPresenter({ forcedState: s });
+  const forceActivity = (value: ForcedActivity) => setPresenter({ forcedActivity: value });
+  const toggleDemoMode = () => setPresenter({ demoMode: !isDemoModeRef.current });
+  const showWarning = () => showEmote('KNIFE', KNIFE_EMOTE_MS);
+  /** Warning emote in every window (the duck that matters is the one on the desktop). */
+  const showWarningEverywhere = () => {
+    showWarning();
+    presenterChannel?.postMessage({ type: 'warning' } satisfies PresenterMessage);
+  };
+  /** Recalibrate in every window: each one runs its own camera pipeline. */
+  const recalibrateEverywhere = () => {
+    handleRecalibrate();
+    presenterChannel?.postMessage({ type: 'recalibrate' } satisfies PresenterMessage);
+  };
+
+  useEffect(() => {
+    if (!presenterChannel) return;
+    const onMessage = (e: MessageEvent<PresenterMessage>) => {
+      const msg = e.data;
+      if (msg.type === 'set') applyPresenter(msg.patch);
+      else if (msg.type === 'recalibrate') handleRecalibrate();
+      else if (msg.type === 'warning') showWarning();
+      else if (msg.type === 'hello') {
+        // A window just opened: send it the current controls
+        presenterChannel.postMessage({
+          type: 'set',
+          patch: {
+            forcedState: forcedStateRef.current,
+            forcedActivity: forcedActivityRef.current,
+            demoMode: isDemoModeRef.current,
+          },
+        } satisfies PresenterMessage);
+      }
+    };
+    presenterChannel.addEventListener('message', onMessage);
+    presenterChannel.postMessage({ type: 'hello' } satisfies PresenterMessage);
+    return () => presenterChannel.removeEventListener('message', onMessage);
+  }, []);
+
   // 3. Hotkeys handler for live judge walkthrough
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Hotkey 1: Force Thriving
-      if (e.key === '1') {
-        setForcedState('THRIVING');
-      } else if (e.key === '2') {
-        // Hotkey 2: Force Slouching
-        setForcedState('SLOUCHING');
-      } else if (e.key === '3') {
-        // Hotkey 3: Force Wilted
-        setForcedState('WILTED');
-      } else if (e.key === '4') {
-        // Hotkey 4: Release override
-        setForcedState(null);
-      } else if (e.key === '5') {
-        // Hotkey 5: preview the "don't duck with me" knife warning
-        showEmote('KNIFE', KNIFE_EMOTE_MS);
-      } else if (e.key === 'd' || e.key === 'D') {
-        // Toggle Demo Mode
-        setIsDemoMode((prev) => !prev);
-      } else if (e.key === 'c' || e.key === 'C') {
-        // Recalibrate
-        handleRecalibrate();
-      }
+      // Typing in a text box (e.g. renaming the duck) must not trigger the single-key hotkeys
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      const key = e.key.toLowerCase();
+      if (key === '1') forceState('THRIVING');
+      else if (key === '2') forceState('SLOUCHING');
+      else if (key === '3') forceState('WILTED');
+      else if (key === '4') forceState(null); // back to following the camera
+      else if (key === '5') showWarningEverywhere();
+      else if (key === '6') forceActivity('WATCHING');
+      else if (key === '7') forceActivity('MUSIC');
+      else if (key === '8') forceActivity('WORKING');
+      else if (key === '9') forceActivity('AUTO'); // back to following the real foreground app
+      else if (key === 'x') changePet((p) => grantCorn(p, 10));
+      else if (key === 'z') changePet((p) => grantCorn(p, 100));
+      else if (key === 'f') handleFeed();
+      else if (key === ']') changePet((p) => setLevel(p, p.level + 1));
+      else if (key === '[') changePet((p) => setLevel(p, p.level - 1));
+      else if (key === 'e') changePet(startOver);
+      else if (key === 'd') toggleDemoMode();
+      else if (key === 'c') recalibrateEverywhere();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -340,9 +511,29 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!electronAPI) return;
     electronAPI.onRecalibrate(() => handleRecalibrate());
-    electronAPI.onForceState((s) => setForcedState(s));
-    electronAPI.onToggleDemoMode(() => setIsDemoMode((prev) => !prev));
+    electronAPI.onForceState((s) => forceState(s));
+    electronAPI.onToggleDemoMode(() => toggleDemoMode());
     electronAPI.onOpenWizard?.(() => setShowWizard(true));
+  }, []);
+
+  // 5. Growth and activity: follow the Electron shell and the other window
+  useEffect(() => {
+    // The pet lives in localStorage; each window picks up what the other one changed
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === PET_STORAGE_KEY) setPet(loadPet());
+      else if (e.key === JOURNAL_STORAGE_KEY) setJournal(loadJournal());
+      else if (e.key === EVENTS_STORAGE_KEY) setEvents(loadEvents());
+    };
+    window.addEventListener('storage', onStorage);
+
+    if (electronAPI && !growthMenuBound) {
+      growthMenuBound = true;
+      electronAPI.onActivity?.((a) => setDetectedActivity(a));
+      electronAPI.onForceActivity?.((value) => forceActivity(value));
+      electronAPI.onAddCorn?.((amount) => changePet((p) => grantCorn(p, amount)));
+      electronAPI.onResetGrowth?.(() => changePet(startOver));
+    }
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // Handle dynamic pet window size expansion & centering for onboarding wizard
@@ -393,11 +584,11 @@ export const App: React.FC = () => {
     return (
       <div className="w-screen h-screen bg-transparent flex flex-col items-center justify-end overflow-hidden select-none pb-1">
         {isCalibrating && (
-          <div className="mb-2 px-3 py-2 rounded-xl bg-slate-900/90 border border-cyan-400/60 text-center shadow-xl">
-            <p className="text-[11px] font-semibold text-white">Sit tall… calibrating</p>
-            <div className="w-36 bg-slate-800 rounded-full h-1.5 mt-1.5 overflow-hidden">
+          <div className="mb-2 px-3 py-2 rounded-xl bg-white border-2 border-black text-center shadow-[3px_3px_0_0_#000]">
+            <p className="text-[11px] font-black text-black">Sit tall… calibrating</p>
+            <div className="w-36 bg-neutral-200 border border-black rounded-full h-2 mt-1.5 overflow-hidden">
               <div
-                className="bg-cyan-400 h-full transition-all duration-200"
+                className="bg-yellow-400 h-full transition-all duration-200"
                 style={{ width: `${calibrationProgress}%` }}
               />
             </div>
@@ -410,6 +601,9 @@ export const App: React.FC = () => {
           speechText={speechText}
           speechCue={speechCue}
           emote={emote}
+          pet={pet}
+          onFeed={handleFeed}
+          activity={activity}
           onDismissSpeech={() => setSpeechText(null)}
           onOpenDashboard={handleOpenDashboard}
           onRecalibrate={handleRecalibrate}
@@ -418,99 +612,73 @@ export const App: React.FC = () => {
     );
   }
 
+  // First-run setup wizard, shown on top of the dashboard or the browser preview
+  const wizardOverlay = showWizard && (
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+      <OnboardingWizard onComplete={handleWizardComplete} onRecalibrateRequested={handleRecalibrate} />
+    </div>
+  );
+
+  if (showDashboard) {
+    return (
+      <div data-theme={theme} className={`h-screen font-sans select-none overflow-hidden ${PAGE}`}>
+        {wizardOverlay}
+        <Dashboard
+          hp={scoringState.hp}
+          state={activeState}
+          strainIndex={scoringState.strainIndex}
+          blinkRate={currentSignals?.blink_rate_1m || 14}
+          worstSignal={scoringState.worstSignal || 'None'}
+          isDemoMode={isDemoMode}
+          onToggleDemoMode={toggleDemoMode}
+          onForceState={forceState}
+          onRecalibrate={recalibrateEverywhere}
+          sessionId={wsClient.getSessionId()}
+          pet={pet}
+          onPetChange={changePet}
+          onFeed={handleFeed}
+          isConnected={isConnected}
+          cameras={cameras}
+          activeCameraId={activeCameraId}
+          onSelectCamera={handleSelectCamera}
+          onHide={isDashboardView ? undefined : () => setShowDashboard(false)}
+          forcedState={forcedState}
+          forcedActivity={forcedActivity}
+          onForceActivity={forceActivity}
+          onShowWarning={showWarningEverywhere}
+          journal={journal}
+          events={events}
+          onEventsChange={changeEvents}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
+      </div>
+    );
+  }
+
+  // Browser preview: a pretend desktop with the duck in the corner
   return (
-    <div className="min-h-screen bg-slate-950/90 text-white flex flex-col justify-between p-4 font-sans select-none relative overflow-hidden">
-      {/* Top Floating App Bar */}
-      <header className="flex items-center justify-between z-40 bg-slate-900/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-800 shadow-xl">
+    <div data-theme={theme} className={`min-h-screen flex flex-col font-sans select-none relative overflow-hidden ${PAGE}`}>
+      <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 bg-[var(--surface)] border-b border-[var(--line)]">
         <div className="flex items-center gap-3">
-          <span className="text-xl">👾</span>
-          <div>
-            <h1 className="text-xs font-black tracking-wider uppercase text-emerald-400">ErgoGotchi</h1>
-            <p className="text-[10px] text-slate-400 font-mono">sunhacks 2026 Edition</p>
+          <span className="w-10 h-10 rounded-xl bg-[var(--accent)] flex items-center justify-center text-xl">🦆</span>
+          <div className="leading-tight">
+            <h1 className="text-base font-bold tracking-tight">ErgoGotchi</h1>
+            <p className="text-[11px] text-[var(--muted)]">Desktop preview</p>
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          {/* Connection status badge */}
-          <span className="flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-emerald-400 shadow-emerald-400/50 shadow' : 'bg-amber-400'
-              }`}
-            />
-            {isConnected ? 'LIVE WS' : 'LOCAL CACHE'}
-          </span>
-
-          {/* Camera picker */}
-          <select
-            value={activeCameraId ?? ''}
-            onChange={(e) => handleSelectCamera(e.target.value)}
-            title="Camera used for posture tracking"
-            className="text-[11px] max-w-[180px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-200 border border-slate-700"
-          >
-            {!activeCameraId && <option value="">📷 No camera</option>}
-            {cameras.map((cam) => (
-              <option key={cam.deviceId} value={cam.deviceId}>
-                📷 {cam.label}
-              </option>
-            ))}
-          </select>
-
-          {/* Demo mode pill */}
-          <button
-            onClick={() => setIsDemoMode((prev) => !prev)}
-            className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border transition-all ${
-              isDemoMode
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                : 'bg-slate-800 text-slate-400 border-slate-700'
-            }`}
-          >
-            {isDemoMode ? '⚡ DEMO (1.5s)' : 'NORMAL'}
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setShowWizard(true)} className={BUTTON_NEUTRAL}>
+            Setup wizard 🪄
           </button>
-
-          {/* Toggle Dashboard Button */}
-          <button
-            onClick={() => setShowDashboard((prev) => !prev)}
-            className="text-xs font-semibold px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow"
-          >
-            {showDashboard ? 'Hide Dashboard' : 'Open Dashboard'}
-          </button>
-
-          {/* Setup Wizard Button */}
-          <button
-            onClick={() => setShowWizard(true)}
-            className="text-xs font-semibold px-3 py-1 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 shadow"
-          >
-            Setup Wizard 🪄
+          <button onClick={() => setShowDashboard(true)} className={BUTTON_PRIMARY}>
+            Open dashboard
           </button>
         </div>
       </header>
 
-      {/* Main View Area: Either Companion Dashboard or Desktop Simulation */}
-      <main className="flex-1 flex flex-col items-center justify-center relative z-10 w-full my-auto">
-        {showWizard && (
-          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-            <OnboardingWizard
-              onComplete={handleWizardComplete}
-              onRecalibrateRequested={handleRecalibrate}
-            />
-          </div>
-        )}
-        {showDashboard ? (
-          <Dashboard
-            hp={scoringState.hp}
-            state={activeState}
-            strainIndex={scoringState.strainIndex}
-            blinkRate={currentSignals?.blink_rate_1m || 14}
-            worstSignal={scoringState.worstSignal || 'None'}
-            isDemoMode={isDemoMode}
-            onToggleDemoMode={() => setIsDemoMode((prev) => !prev)}
-            onForceState={(s) => setForcedState(s)}
-            onRecalibrate={handleRecalibrate}
-            sessionId={wsClient.getSessionId()}
-          />
-        ) : (
-          /* Simulated Transparent Desktop Canvas / Code Workspace */
+      <main className="flex-1 flex flex-col items-center justify-center relative z-10 w-full p-4">
+        {wizardOverlay}
           <div className="relative w-full max-w-4xl h-96 rounded-3xl bg-slate-900/40 border border-slate-800/80 shadow-2xl flex flex-col justify-between p-6 backdrop-blur-sm overflow-hidden">
             {/* Mock Code Editor in Background to demonstrate desktop companion feel */}
             <div className="font-mono text-xs text-slate-500 space-y-1 select-none pointer-events-none opacity-60">
@@ -546,24 +714,20 @@ export const App: React.FC = () => {
                 isReviving={scoringState.isReviving}
                 speechText={speechText}
                 speechCue={speechCue}
-          emote={emote}
+                emote={emote}
+                pet={pet}
+                onFeed={handleFeed}
+                activity={activity}
                 onDismissSpeech={() => setSpeechText(null)}
                 onOpenDashboard={handleOpenDashboard}
                 onRecalibrate={handleRecalibrate}
               />
             </div>
           </div>
-        )}
       </main>
 
-      {/* Bottom Hint Footer */}
-      <footer className="text-center text-[11px] text-slate-500 py-2 select-none z-30">
-        Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">1</kbd> Thriving |{' '}
-        <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">2</kbd> Slouching |{' '}
-        <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">3</kbd> Wilted |{' '}
-        <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">4</kbd> Auto |{' '}
-        <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">D</kbd> Toggle Demo Mode |{' '}
-        <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">C</kbd> Calibrate
+      <footer className="text-center text-[11px] text-[var(--muted)] select-none pb-3">
+        Double-click the duck or press “Open dashboard” for stats, wardrobe and presenter controls.
       </footer>
     </div>
   );

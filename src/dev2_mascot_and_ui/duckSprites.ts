@@ -29,6 +29,27 @@ export const PALETTE: Record<string, string> = {
   Z: '#64748b', // sleep "Z"
   T: '#7dd3fc', // sweat drop
   R: '#ef4444', // anger mark
+  // --- egg
+  L: '#fff7e0', // shell
+  N: '#ecdcb0', // shell shade
+  Q: '#86efac', // shell spots
+  // --- baby duck
+  A: '#fde047', // down feathers
+  a: '#eab308', // down shade
+  I: '#f8fafc', // diaper
+  J: '#cbd5e1', // diaper shade
+  V: '#38bdf8', // diaper pin
+  F: '#f472b6', // rattle, pacifier, music note
+  // --- activity props
+  X: '#334155', // headphone band
+  x: '#a78bfa', // headphone cushion
+  n: '#c084fc', // second music note
+  v: '#92400e', // TV cabinet
+  u: '#38bdf8', // TV screen
+  w: '#e0f2fe', // TV screen flicker
+  l: '#94a3b8', // laptop lid
+  k: '#475569', // laptop base
+  g: '#86efac', // laptop glow
 };
 
 /** Sprite keys: the pet states plus the two extra looks. */
@@ -100,13 +121,16 @@ const FLOPPED = [
 ];
 
 // ---------------------------------------------------------------- helpers
+/** [x, y, pixels]: a run of pixels to draw starting at (x, y). */
+export type Mark = [number, number, string];
+
 /** Bottom-align art onto the full 24-row canvas. */
-function canvas(art: string[]): string[] {
+export function canvas(art: string[]): string[] {
   return [...Array(DUCK_H - art.length).fill('.'.repeat(DUCK_W)), ...art];
 }
 
 /** Copy rows and stamp strings at (x, y) in canvas coordinates. '.' in a stamp leaves the pixel unchanged. */
-function stamp(rows: string[], marks: Array<[number, number, string]>): string[] {
+export function stamp(rows: string[], marks: Mark[]): string[] {
   const out = [...rows];
   for (const [x, y, s] of marks) {
     const chars = out[y].split('');
@@ -119,10 +143,10 @@ function stamp(rows: string[], marks: Array<[number, number, string]>): string[]
 }
 
 // BASE art starts on canvas row 3, so face rows are: eyes 8-9, beak 10-12, wings 15-17
-const DUCK = canvas(BASE);
+export const DUCK = canvas(BASE);
 
-const EYES_CLOSED = stamp(DUCK, [[5, 8, 'WWWWWWWWWWWWWW'], [5, 9, 'WWKKWWWWWWKKWW']]);
-const EYES_HAPPY = stamp(DUCK, [[5, 8, 'WWWEWWWWWWEWWW'], [5, 9, 'WWEWEWWWWEWEWW']]);
+export const EYES_CLOSED = stamp(DUCK, [[5, 8, 'WWWWWWWWWWWWWW'], [5, 9, 'WWKKWWWWWWKKWW']]);
+export const EYES_HAPPY = stamp(DUCK, [[5, 8, 'WWWEWWWWWWEWWW'], [5, 9, 'WWEWEWWWWEWEWW']]);
 
 const SPARKLE_A: Array<[number, number, string]> = [[1, 7, 'Y'], [0, 8, 'YWY'], [1, 9, 'Y'], [21, 4, 'Y'], [20, 5, 'YWY'], [21, 6, 'Y']];
 const SPARKLE_B: Array<[number, number, string]> = [[1, 8, 'Y'], [21, 5, 'Y']];
