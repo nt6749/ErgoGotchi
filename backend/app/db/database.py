@@ -17,6 +17,19 @@ from app.config import settings
 
 logger = logging.getLogger("ergogotchi.db")
 
+_SESSION_NAMESPACE = uuid.UUID("6f1c2a52-3d1e-4b8e-9a51-e0a0f0c0ffee")
+
+
+def to_session_uuid(session_id) -> uuid.UUID:
+    """Map any client session id to a stable UUID (same string -> same UUID)."""
+    if isinstance(session_id, uuid.UUID):
+        return session_id
+    sid = str(session_id or "default-session")
+    try:
+        return uuid.UUID(sid)
+    except ValueError:
+        return uuid.uuid5(_SESSION_NAMESPACE, sid)
+
 class DatabaseManager:
     def __init__(self):
         self.pool: Optional[asyncpg.Pool] = None
@@ -123,12 +136,7 @@ class DatabaseManager:
                     elif not ts:
                         ts = datetime.now(timezone.utc)
 
-                    sid = r.get("session_id")
-                    if isinstance(sid, str):
-                        try:
-                            sid = uuid.UUID(sid)
-                        except Exception:
-                            sid = uuid.uuid4()
+                    sid = to_session_uuid(r.get("session_id"))
 
                     tuples.append((
                         ts,
@@ -202,7 +210,7 @@ class DatabaseManager:
         """Retrieve 1-minute bucketed continuous aggregate series with strain velocity."""
         if self.pool and self.is_timescaledb:
             try:
-                sid = uuid.UUID(session_id)
+                sid = to_session_uuid(session_id)
                 query = """
                 SELECT 
                     bucket,
