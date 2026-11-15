@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -93,7 +94,8 @@ class DatabaseManager:
     async def _init_postgres(self, conn: asyncpg.Connection):
         """Execute PostgreSQL / TimescaleDB schema."""
         try:
-            with open("app/db/schema.sql", "r") as f:
+            schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+            with open(schema_path, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
             await conn.execute(schema_sql)
             logger.info("TimescaleDB / Tiger Data schema verified successfully.")
@@ -182,7 +184,7 @@ class DatabaseManager:
             elif not ts:
                 ts = datetime.now(timezone.utc).isoformat()
 
-            sid = str(r.get("session_id", "default-session"))
+            sid = str(to_session_uuid(r.get("session_id")))
             rows.append((
                 ts,
                 sid,
@@ -252,6 +254,7 @@ class DatabaseManager:
         return []
 
     def _query_sqlite_series(self, session_id: str, minutes: int) -> List[Dict[str, Any]]:
+        sid = str(to_session_uuid(session_id))
         query = """
         SELECT 
             strftime('%Y-%m-%dT%H:%M:00Z', recorded_at) AS bucket,
@@ -262,12 +265,12 @@ class DatabaseManager:
             AVG(blink_rate_1m) AS avg_blink_rate,
             MIN(hp) AS min_hp
         FROM ergo_telemetry
-        WHERE session_id = ? AND present = 1
+        WHERE session_id = ? AND present = 1 AND datetime(recorded_at) >= datetime('now', '-' || ? || ' minutes')
         GROUP BY bucket
         ORDER BY bucket ASC;
         """
         cursor = self.sqlite_conn.cursor()
-        cursor.execute(query, (str(session_id),))
+        cursor.execute(query, (sid, int(minutes)))
         rows = cursor.fetchall()
         
         results = []
