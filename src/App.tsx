@@ -20,6 +20,16 @@ import {
 import { visionPipeline } from './vision/visionPipeline';
 import { wsClient } from './net/websocketClient';
 import { MascotSprite } from './pet/MascotSprite';
+import type { PetEmote } from './pet/PixelMascot';
+
+/** Posture warnings clear after this many consecutive seconds of good posture. */
+const CLEAR_WARNING_AFTER_GOOD_SECONDS = 2;
+/** Strain below this counts as "sitting up" (same line where HP stops draining). */
+const GOOD_POSTURE_STRAIN = 0.5;
+const POSTURE_CUES: StretchCue[] = ['CHIN_TUCK', 'SHOULDER_ROLL', 'SIT_BACK'];
+
+/** How long the "don't duck with me" knife warning stays up (matches the speech bubble). */
+const KNIFE_EMOTE_MS = 8000;
 import { Dashboard } from './dashboard/Dashboard';
 
 interface ElectronAPI {
@@ -57,6 +67,15 @@ export const App: React.FC = () => {
   const [speechText, setSpeechText] = useState<string | null>(null);
   const [speechCue, setSpeechCue] = useState<StretchCue | null>(null);
 
+  // Temporary pet reaction shown on top of its normal look
+  const [emote, setEmote] = useState<PetEmote | null>(null);
+  const emoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showEmote = (e: PetEmote, ms: number) => {
+    setEmote(e);
+    if (emoteTimerRef.current) clearTimeout(emoteTimerRef.current);
+    emoteTimerRef.current = setTimeout(() => setEmote(null), ms);
+  };
+
   const scoringStateRef = useRef<ScoringState>(scoringState);
   scoringStateRef.current = scoringState;
 
@@ -74,10 +93,19 @@ export const App: React.FC = () => {
   const isPresentRef = useRef<boolean>(isPresent);
   isPresentRef.current = isPresent;
 
+  const speechCueRef = useRef<StretchCue | null>(speechCue);
+  speechCueRef.current = speechCue;
+  const emoteRef = useRef<PetEmote | null>(emote);
+  emoteRef.current = emote;
+  const goodPostureSecondsRef = useRef(0);
+
   // 1. Initialise Vision Pipeline & WebSocket Client
   useEffect(() => {
     wsClient.onConnectionChange = (connected) => setIsConnected(connected);
     wsClient.onInterventionReceived = (msg) => {
+      // A slow (e.g. Gemini) reply can land after the user already sat up: don't nag then
+      const postureCue = POSTURE_CUES.includes(msg.cue as StretchCue);
+      if (postureCue && scoringStateRef.current.strainIndex < GOOD_POSTURE_STRAIN) return;
       setSpeechText(msg.text);
       setSpeechCue(msg.cue);
     };
@@ -150,6 +178,20 @@ export const App: React.FC = () => {
 
       setScoringState(next);
 
+      // Clear posture warnings (bubble + knife) shortly after the user sits up
+      const goodPosture = next.state !== 'CALIBRATING' && next.strainIndex < GOOD_POSTURE_STRAIN;
+      goodPostureSecondsRef.current = goodPosture ? goodPostureSecondsRef.current + 1 : 0;
+      if (goodPostureSecondsRef.current >= CLEAR_WARNING_AFTER_GOOD_SECONDS) {
+        if (speechCueRef.current && POSTURE_CUES.includes(speechCueRef.current as StretchCue)) {
+          setSpeechText(null);
+          setSpeechCue(null);
+        }
+        if (emoteRef.current === 'KNIFE') {
+          if (emoteTimerRef.current) clearTimeout(emoteTimerRef.current);
+          setEmote(null);
+        }
+      }
+
       // Contract 1: Emit 1 Hz Telemetry over WebSocket
       wsClient.sendTelemetry({
         present: isPresent,
@@ -167,6 +209,9 @@ export const App: React.FC = () => {
 
       // Contract 2: Emit Intervention Request if trigger condition met
       if (next.triggerIntervention && next.interventionReason) {
+        // Bad posture (slouching or leaning in too close) -> knife warning, even when offline
+        if (next.interventionReason === 'SLOUCH') showEmote('KNIFE', KNIFE_EMOTE_MS);
+
         const sessionMins = Math.round((Date.now() - sessionStartTimeRef.current) / 60000);
         wsClient.requestIntervention(next.interventionReason, {
           minutes_in_session: Math.max(1, sessionMins),
@@ -196,6 +241,9 @@ export const App: React.FC = () => {
       } else if (e.key === '4') {
         // Hotkey 4: Release override
         setForcedState(null);
+      } else if (e.key === '5') {
+        // Hotkey 5: preview the "don't duck with me" knife warning
+        showEmote('KNIFE', KNIFE_EMOTE_MS);
       } else if (e.key === 'd' || e.key === 'D') {
         // Toggle Demo Mode
         setIsDemoMode((prev) => !prev);
@@ -249,6 +297,7 @@ export const App: React.FC = () => {
           isReviving={scoringState.isReviving}
           speechText={speechText}
           speechCue={speechCue}
+          emote={emote}
           onDismissSpeech={() => setSpeechText(null)}
           onOpenDashboard={handleOpenDashboard}
           onRecalibrate={handleRecalibrate}
@@ -354,6 +403,7 @@ export const App: React.FC = () => {
                 isReviving={scoringState.isReviving}
                 speechText={speechText}
                 speechCue={speechCue}
+          emote={emote}
                 onDismissSpeech={() => setSpeechText(null)}
                 onOpenDashboard={handleOpenDashboard}
                 onRecalibrate={handleRecalibrate}

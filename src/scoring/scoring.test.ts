@@ -145,4 +145,20 @@ describe('ErgoGotchi Scoring Engine', () => {
     expect(state.state).not.toBe('WILTED');
     expect(nudged).toBe(true);
   });
+
+  it('does not warn about slouching while HP is still above 50', () => {
+    let state = createInitialState();
+    state.state = 'SLOUCHING';
+    state.slouchDwellAccumulator = DEMO_PARAMS.slouchDwellSeconds;
+    state.hp = 100;
+    state.speechCooldownTimer = 0;
+    let firstWarnHp: number | null = null;
+    for (let i = 0; i < 30 && firstWarnHp === null; i++) {
+      state = step(state, SEVERE_SLOUCH_SIGNALS, 1.0, DEMO_PARAMS, true, true);
+      if (state.triggerIntervention && state.interventionReason === 'SLOUCH') firstWarnHp = state.hp;
+    }
+    expect(firstWarnHp).not.toBeNull();
+    expect(firstWarnHp!).toBeLessThanOrEqual(DEMO_PARAMS.warnAtHp);
+    expect(firstWarnHp!).toBeGreaterThan(DEMO_PARAMS.warnAtHp - 10); // fires promptly once HP reaches 50
+  });
 });

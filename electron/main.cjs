@@ -41,6 +41,10 @@ function createPetWindow() {
   });
 
   petWindow.setAlwaysOnTop(true, 'floating');
+
+  // Clicks pass through the transparent window to whatever is underneath.
+  // `forward` keeps mouse-move events flowing so the page can re-enable clicks while hovering the pet.
+  petWindow.setIgnoreMouseEvents(true, { forward: true });
   if (process.platform === 'darwin') {
     petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
@@ -138,6 +142,12 @@ ipcMain.on('pet-move', (event, { x, y }) => {
 ipcMain.on('pet-set-bounds', (event, bounds) => {
   if (petWindow) {
     petWindow.setBounds(bounds);
+  }
+});
+
+ipcMain.on('pet-ignore-mouse', (event, ignore) => {
+  if (petWindow) {
+    petWindow.setIgnoreMouseEvents(!!ignore, { forward: true });
   }
 });
 
